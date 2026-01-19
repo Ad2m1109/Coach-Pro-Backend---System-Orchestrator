@@ -6,11 +6,15 @@ import os
 
 from services.match_service import MatchService
 from services.player_match_statistics_service import PlayerMatchStatisticsService
-from analysis_engine import analyze_football_match
+from services.analysis_grpc_service import AnalysisGrpcService
+from analysis_engine import parse_and_persist_results
 
 # In-memory store for analysis status
 # In production, use Redis or similar
 _analysis_status: Dict[str, Dict] = {}
+
+# Initialize gRPC service
+_grpc_service = AnalysisGrpcService()
 
 async def start_video_analysis(
     match_id: str,
@@ -27,6 +31,7 @@ async def start_video_analysis(
         raise HTTPException(status_code=404, detail="Match not found")
 
     # Save uploaded video to temp file
+    # In a real system, we might upload to S3 and pass the URL to the analysis engine
     with NamedTemporaryFile(delete=False, suffix=".mp4") as temp_video:
         try:
             shutil.copyfileobj(video_file.file, temp_video)
@@ -67,7 +72,7 @@ async def _run_analysis(
     match_service: MatchService,
     player_stats_service: PlayerMatchStatisticsService
 ):
-    """Background task to run video analysis and persist results."""
+    """Background task to run video analysis via gRPC and persist results."""
     try:
         # Update status to running
         _analysis_status[match_id].update({
@@ -75,19 +80,47 @@ async def _run_analysis(
             "progress": 0.0
         })
 
-        # Run analysis (this blocks until complete)
-        results = analyze_football_match(
+        # Run analysis via gRPC stream
+        # Note: In a production app, we'd pass actual calibration paths if available
+        responses = _grpc_service.analyze_video(
             video_path=video_path,
             match_id=match_id,
-            db_connection=match_service.db_connection
+            confidence_threshold=0.5
         )
 
-        # Update status on success
-        _analysis_status[match_id].update({
-            "status": "completed",
-            "progress": 1.0,
-            "results": results
-        })
+        final_result = None
+        for response in responses:
+            if response.status == "FAILED":
+                raise RuntimeError(response.message)
+            
+            # Update progress
+            _analysis_status[match_id].update({
+                "status": response.status.lower(),
+                "progress": response.progress,
+                "message": response.message
+            })
+            
+            if response.status == "COMPLETED":
+                final_result = response.result
+                break
+
+        if final_result:
+            # Persist results to DB
+            # The C++ engine is expected to provide paths to the generated CSVs
+            output_dir = os.path.dirname(final_result.player_metrics_csv_path)
+            
+            results_summary = parse_and_persist_results(
+                output_dir=output_dir,
+                db_connection=match_service.db_connection,
+                match_id=match_id
+            )
+
+            # Update status on success
+            _analysis_status[match_id].update({
+                "status": "completed",
+                "progress": 1.0,
+                "results": results_summary
+            })
 
     except Exception as e:
         # Update status on failure
@@ -95,7 +128,8 @@ async def _run_analysis(
             "status": "failed",
             "error": str(e)
         })
-        raise
+        # Log the error properly in a real app
+        print(f"Analysis failed for match {match_id}: {e}")
     
     finally:
         # Clean up temp file
