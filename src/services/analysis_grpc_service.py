@@ -63,6 +63,32 @@ class AnalysisGrpcService:
                 message=f"Unexpected Error: {str(e)}"
             )
 
+    def stream_analysis(
+        self,
+        chunks_generator: Generator[analysis_pb2.VideoChunk, None, None]
+    ) -> Generator[analysis_pb2.MetricsUpdate, None, None]:
+        """
+        Sends a stream of video chunks to the gRPC server and yields metrics updates.
+        """
+        stub = self._get_stub()
+        try:
+            logger.info("Starting bi-directional streaming gRPC analysis")
+            responses = stub.StreamAnalysis(chunks_generator)
+            for response in responses:
+                yield response
+        except grpc.RpcError as e:
+            logger.error(f"gRPC error during streaming: {e.details()}")
+            yield analysis_pb2.MetricsUpdate(
+                status="FAILED",
+                message=f"gRPC Error: {e.details()}"
+            )
+        except Exception as e:
+            logger.error(f"Unexpected error during streaming: {e}")
+            yield analysis_pb2.MetricsUpdate(
+                status="FAILED",
+                message=f"Unexpected Error: {str(e)}"
+            )
+
     def close(self):
         if self.channel:
             self.channel.close()

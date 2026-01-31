@@ -39,13 +39,25 @@ class AnalysisEngineStub(object):
                 request_serializer=analysis__pb2.VideoRequest.SerializeToString,
                 response_deserializer=analysis__pb2.VideoResponse.FromString,
                 _registered_method=True)
+        self.StreamAnalysis = channel.stream_stream(
+                '/analysis.AnalysisEngine/StreamAnalysis',
+                request_serializer=analysis__pb2.VideoChunk.SerializeToString,
+                response_deserializer=analysis__pb2.MetricsUpdate.FromString,
+                _registered_method=True)
 
 
 class AnalysisEngineServicer(object):
     """Missing associated documentation comment in .proto file."""
 
     def AnalyzeVideo(self, request, context):
-        """Analyzes a video and returns a stream of progress updates and final results.
+        """Legacy method (File-based)
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def StreamAnalysis(self, request_iterator, context):
+        """New Streaming method (Bi-directional)
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -58,6 +70,11 @@ def add_AnalysisEngineServicer_to_server(servicer, server):
                     servicer.AnalyzeVideo,
                     request_deserializer=analysis__pb2.VideoRequest.FromString,
                     response_serializer=analysis__pb2.VideoResponse.SerializeToString,
+            ),
+            'StreamAnalysis': grpc.stream_stream_rpc_method_handler(
+                    servicer.StreamAnalysis,
+                    request_deserializer=analysis__pb2.VideoChunk.FromString,
+                    response_serializer=analysis__pb2.MetricsUpdate.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -87,6 +104,33 @@ class AnalysisEngine(object):
             '/analysis.AnalysisEngine/AnalyzeVideo',
             analysis__pb2.VideoRequest.SerializeToString,
             analysis__pb2.VideoResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def StreamAnalysis(request_iterator,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.stream_stream(
+            request_iterator,
+            target,
+            '/analysis.AnalysisEngine/StreamAnalysis',
+            analysis__pb2.VideoChunk.SerializeToString,
+            analysis__pb2.MetricsUpdate.FromString,
             options,
             channel_credentials,
             insecure,

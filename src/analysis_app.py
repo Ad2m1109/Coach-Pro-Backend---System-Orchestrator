@@ -9,9 +9,9 @@ import cv2
 import numpy as np
 
 from database import get_db, Connection
-from analysis_engine import FootballAnalyzer, analyze_football_match, parse_and_persist_results
 from services.user_service import UserService
 from models.user import User
+import analysis_pb2
 
 # --- Configuration for JWT (Synced with app.py) --- #
 SECRET_KEY = "your-secret-key"
@@ -52,37 +52,51 @@ single_image_analyzer = FootballAnalyzer()
 # In-memory store for analysis status
 analysis_status: Dict[str, Dict[str, Any]] = {}
 
-async def run_async_analysis(video_path: str, db: Connection, match_id: str):
-    """Background task to run the analysis and update status."""
+async def run_streaming_analysis(video_path: str, db: Connection, match_id: str):
+    """Phase 1: Stream chunks to gRPC and track progress."""
     from services.analysis_grpc_service import AnalysisGrpcService
     grpc_service = AnalysisGrpcService()
     
-    try:
-        analysis_status[match_id] = {"status": "pending", "progress": 0.0}
-        
-        # Get paths (calibration, model)
+    def chunk_generator():
         calib_path = os.environ.get('CALIB_PATH', '')
         if not calib_path:
             candidate_calib = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'Analysis', 'calibration.yaml'))
             if os.path.exists(candidate_calib):
                 calib_path = candidate_calib
-        
+
         model_path = os.environ.get('MODEL_PATH', '')
         if not model_path:
             candidate = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'Analysis', 'yolov8m.onnx'))
             if os.path.exists(candidate):
                 model_path = candidate
 
-        # Start gRPC analysis
-        responses = grpc_service.analyze_video(
-            video_path=video_path,
-            match_id=match_id,
-            calibration_path=calib_path,
-            model_path=model_path,
-            confidence_threshold=0.5
-        )
+        with open(video_path, "rb") as f:
+            chunk_idx = 0
+            while True:
+                data = f.read(1024 * 1024) # 1MB chunks
+                if not data:
+                    break
+                yield analysis_pb2.VideoChunk(
+                    data=data,
+                    match_id=match_id,
+                    calibration_path=calib_path,
+                    model_path=model_path,
+                    chunk_index=chunk_idx,
+                    is_last_chunk=False
+                )
+                chunk_idx += 1
+            
+            yield analysis_pb2.VideoChunk(
+                data=b"",
+                match_id=match_id,
+                chunk_index=chunk_idx,
+                is_last_chunk=True
+            )
 
-        final_result = None
+    try:
+        analysis_status[match_id] = {"status": "streaming", "progress": 0.0}
+        
+        responses = grpc_service.stream_analysis(chunk_generator())
         for response in responses:
             analysis_status[match_id].update({
                 "status": response.status.lower(),
@@ -90,25 +104,10 @@ async def run_async_analysis(video_path: str, db: Connection, match_id: str):
                 "message": response.message
             })
             
-            if response.status == "FAILED":
-                raise RuntimeError(response.message)
-            if response.status == "COMPLETED":
-                final_result = response.result
-                break
+            # Phase 2: Handle metrics here
+            # if response.metrics:
+            #     persist_metrics_batch(response.metrics, db)
 
-        if final_result:
-            output_dir = os.path.dirname(final_result.player_metrics_csv_path)
-            results_summary = parse_and_persist_results(
-                output_dir=output_dir,
-                db_connection=db,
-                match_id=match_id
-            )
-
-            analysis_status[match_id].update({
-                "status": "completed",
-                "progress": 1.0,
-                "results": results_summary
-            })
     except Exception as e:
         analysis_status[match_id] = {
             "status": "failed",
@@ -161,7 +160,7 @@ async def analyze_match_video(
             video_path = tmp_file.name
         
         analysis_status[effective_match_id] = {"status": "pending", "progress": 0.0}
-        background_tasks.add_task(run_async_analysis, video_path, db, effective_match_id)
+        background_tasks.add_task(run_streaming_analysis, video_path, db, effective_match_id)
         
         return {
             "status": "accepted",
