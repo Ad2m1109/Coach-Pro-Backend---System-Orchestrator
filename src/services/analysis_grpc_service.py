@@ -27,6 +27,7 @@ class AnalysisGrpcService:
         video_path: str, 
         match_id: str, 
         calibration_path: str = "", 
+        model_path: str = "",
         confidence_threshold: float = 0.5
     ) -> Generator[analysis_pb2.VideoResponse, None, None]:
         """
@@ -37,6 +38,7 @@ class AnalysisGrpcService:
             video_path=video_path,
             match_id=match_id,
             calibration_path=calibration_path,
+            model_path=model_path,
             confidence_threshold=confidence_threshold
         )
         

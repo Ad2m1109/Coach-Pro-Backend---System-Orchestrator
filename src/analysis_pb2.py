@@ -24,19 +24,19 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0e\x61nalysis.proto\x12\x08\x61nalysis\"l\n\x0cVideoRequest\x12\x12\n\nvideo_path\x18\x01 \x01(\t\x12\x18\n\x10\x63\x61libration_path\x18\x02 \x01(\t\x12\x1c\n\x14\x63onfidence_threshold\x18\x03 \x01(\x02\x12\x10\n\x08match_id\x18\x04 \x01(\t\"|\n\rVideoResponse\x12\x0e\n\x06job_id\x18\x01 \x01(\t\x12\x0e\n\x06status\x18\x02 \x01(\t\x12\x10\n\x08progress\x18\x03 \x01(\x02\x12\x0f\n\x07message\x18\x04 \x01(\t\x12(\n\x06result\x18\x05 \x01(\x0b\x32\x18.analysis.AnalysisResult\"\xa4\x01\n\x0e\x41nalysisResult\x12\x10\n\x08match_id\x18\x01 \x01(\t\x12\x14\n\x0ctotal_frames\x18\x02 \x01(\x05\x12\x17\n\x0fplayers_tracked\x18\x03 \x01(\x05\x12\x11\n\treport_id\x18\x04 \x01(\t\x12\x1f\n\x17player_metrics_csv_path\x18\x05 \x01(\t\x12\x1d\n\x15\x62\x61ll_metrics_csv_path\x18\x06 \x01(\t2S\n\x0e\x41nalysisEngine\x12\x41\n\x0c\x41nalyzeVideo\x12\x16.analysis.VideoRequest\x1a\x17.analysis.VideoResponse0\x01\x62\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0e\x61nalysis.proto\x12\x08\x61nalysis\"\x80\x01\n\x0cVideoRequest\x12\x12\n\nvideo_path\x18\x01 \x01(\t\x12\x18\n\x10\x63\x61libration_path\x18\x02 \x01(\t\x12\x1c\n\x14\x63onfidence_threshold\x18\x03 \x01(\x02\x12\x10\n\x08match_id\x18\x04 \x01(\t\x12\x12\n\nmodel_path\x18\x05 \x01(\t\"|\n\rVideoResponse\x12\x0e\n\x06job_id\x18\x01 \x01(\t\x12\x0e\n\x06status\x18\x02 \x01(\t\x12\x10\n\x08progress\x18\x03 \x01(\x02\x12\x0f\n\x07message\x18\x04 \x01(\t\x12(\n\x06result\x18\x05 \x01(\x0b\x32\x18.analysis.AnalysisResult\"\xa4\x01\n\x0e\x41nalysisResult\x12\x10\n\x08match_id\x18\x01 \x01(\t\x12\x14\n\x0ctotal_frames\x18\x02 \x01(\x05\x12\x17\n\x0fplayers_tracked\x18\x03 \x01(\x05\x12\x11\n\treport_id\x18\x04 \x01(\t\x12\x1f\n\x17player_metrics_csv_path\x18\x05 \x01(\t\x12\x1d\n\x15\x62\x61ll_metrics_csv_path\x18\x06 \x01(\t2S\n\x0e\x41nalysisEngine\x12\x41\n\x0c\x41nalyzeVideo\x12\x16.analysis.VideoRequest\x1a\x17.analysis.VideoResponse0\x01\x62\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'analysis_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
-  _globals['_VIDEOREQUEST']._serialized_start=28
-  _globals['_VIDEOREQUEST']._serialized_end=136
-  _globals['_VIDEORESPONSE']._serialized_start=138
-  _globals['_VIDEORESPONSE']._serialized_end=262
-  _globals['_ANALYSISRESULT']._serialized_start=265
-  _globals['_ANALYSISRESULT']._serialized_end=429
-  _globals['_ANALYSISENGINE']._serialized_start=431
-  _globals['_ANALYSISENGINE']._serialized_end=514
+  _globals['_VIDEOREQUEST']._serialized_start=29
+  _globals['_VIDEOREQUEST']._serialized_end=157
+  _globals['_VIDEORESPONSE']._serialized_start=159
+  _globals['_VIDEORESPONSE']._serialized_end=283
+  _globals['_ANALYSISRESULT']._serialized_start=286
+  _globals['_ANALYSISRESULT']._serialized_end=450
+  _globals['_ANALYSISENGINE']._serialized_start=452
+  _globals['_ANALYSISENGINE']._serialized_end=535
 # @@protoc_insertion_point(module_scope)

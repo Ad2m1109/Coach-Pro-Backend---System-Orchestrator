@@ -74,91 +74,61 @@ def _parse_ball_metrics_csv(csv_path: str) -> List[Dict[str, Any]]:
 
 
 def analyze_football_match(video_path: str, db_connection, match_id: str = '') -> Dict[str, Any]:
-    """Run the C++ analyzer on `video_path`, parse outputs and persist to DB.
-
-    Expected environment variables to configure paths:
-      - TEST_RUNNER_PATH: path to C++ binary (default: ./build/test_runner)
-      - MODEL_PATH: path to ONNX model (optional)
-      - CALIB_PATH: path to calibration.yaml (optional)
-
-    The C++ binary must output `player_metrics.csv` and `ball_metrics.csv` in the output dir.
+    """Run the C++ analyzer via gRPC, parse outputs and persist to DB.
     """
-    # Prefer an explicit env override
-    test_runner = os.environ.get('TEST_RUNNER_PATH', '')
-    model_path = os.environ.get('MODEL_PATH', '')
+    from services.analysis_grpc_service import AnalysisGrpcService
+    
+    grpc_service = AnalysisGrpcService()
     calib_path = os.environ.get('CALIB_PATH', '')
-
-    # If not provided, look for sibling AI repo and its built binary
-    if not test_runner:
-        sibling_runner = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'football-analyset-ai-model-main', 'build', 'test_runner'))
-        if os.path.exists(sibling_runner):
-            test_runner = sibling_runner
-        else:
-            # Also check top-level relative path (when running from project root)
-            sibling_runner2 = os.path.abspath(os.path.join(os.getcwd(), 'football-analyset-ai-model-main', 'build', 'test_runner'))
-            if os.path.exists(sibling_runner2):
-                test_runner = sibling_runner2
-
-    # If model/calibration paths not specified, try sibling repo defaults
-    if not model_path:
-        candidate = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'football-analyset-ai-model-main', 'yolov8m.onnx'))
-        if os.path.exists(candidate):
-            model_path = candidate
     if not calib_path:
-        candidate_calib = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'football-analyset-ai-model-main', 'calibration.yaml'))
+        candidate_calib = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'Analysis', 'calibration.yaml'))
         if os.path.exists(candidate_calib):
             calib_path = candidate_calib
 
-    if not test_runner or not os.path.exists(test_runner):
-        raise FileNotFoundError(f"C++ analyzer binary not found. Checked TEST_RUNNER_PATH and sibling repo; tried: {test_runner}")
+    model_path = os.environ.get('MODEL_PATH', '')
+    if not model_path:
+        candidate = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'Analysis', 'yolov8m.onnx'))
+        if os.path.exists(candidate):
+            model_path = candidate
 
-    # Prepare a temporary output directory for CSVs
-    with tempfile.TemporaryDirectory() as out_dir:
-        cmd: List[str] = [test_runner, '--video', video_path, '--output-dir', out_dir]
-        if model_path:
-            cmd += ['--model', model_path]
-        if calib_path:
-            cmd += ['--calib', calib_path]
+    try:
+        print(f"Starting gRPC analysis for match {match_id}...")
+        responses = grpc_service.analyze_video(
+            video_path=video_path,
+            match_id=match_id,
+            calibration_path=calib_path,
+            model_path=model_path,
+            confidence_threshold=0.5
+        )
 
-        # Run the C++ analyzer (blocking). Consider making this async in future.
-        try:
-            print(f"Running C++ analyzer: {' '.join(cmd)}")
-            completed = subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=60*60)
-            print('Analyzer stdout:', completed.stdout[:1000])
-            print('Analyzer stderr:', completed.stderr[:1000])
-        except subprocess.CalledProcessError as e:
-            print('Analyzer failed:', e.stderr)
-            raise
-        except subprocess.TimeoutExpired:
-            raise RuntimeError('C++ analyzer timed out')
+        final_result = None
+        for response in responses:
+            print(f"gRPC Update: {response.status} - {response.message} ({response.progress*100:.1f}%)")
+            if response.status == "FAILED":
+                raise RuntimeError(response.message)
+            if response.status == "COMPLETED":
+                final_result = response.result
+                break
 
-        # Parse CSV outputs
-        player_csv = os.path.join(out_dir, 'player_metrics.csv')
-        ball_csv = os.path.join(out_dir, 'ball_metrics.csv')
+        if not final_result:
+            raise RuntimeError("Analysis failed to return final results")
 
-        player_rows = _parse_player_metrics_csv(player_csv)
-        ball_rows = _parse_ball_metrics_csv(ball_csv)
-
-        # Persist results to DB using helper
-        try:
-            parse_and_persist_results(out_dir, db_connection, match_id)
-        except Exception as e:
-            print('Warning: error while persisting results:', e)
-
-        # Build a JSON-friendly summary to return to client
-        summary_stats = {
-            'players_detected': len(set([r.get('player_id') for r in player_rows if r.get('player_id') is not None])),
-            'player_rows': len(player_rows),
-            'ball_rows': len(ball_rows),
-        }
+        # Persist results to DB
+        output_dir = os.path.dirname(final_result.player_metrics_csv_path)
+        summary_stats = parse_and_persist_results(output_dir, db_connection, match_id)
 
         return {
             'message': 'Analysis complete',
             'video_path': video_path,
             'summary_stats': summary_stats,
-            'player_rows_sample': player_rows[:5],
-            'ball_rows_sample': ball_rows[:5]
+            'match_id': match_id
         }
+
+    except Exception as e:
+        print(f"Analysis failed: {e}")
+        raise
+    finally:
+        grpc_service.close()
 
 
 def parse_and_persist_results(output_dir: str, db_connection, match_id: str = '') -> Dict[str, Any]:

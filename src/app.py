@@ -1,14 +1,14 @@
 #uvicorn app:app --host 0.0.0.0 --port 8000
-from fastapi import FastAPI, Depends, File, UploadFile, HTTPException, status
+from fastapi import FastAPI, Depends, File, UploadFile, HTTPException, status, BackgroundTasks, Form
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Optional, Dict, Any
 
 from database import get_db, Connection
-from analysis_engine import FootballAnalyzer, analyze_football_match, parse_and_persist_results
+from database import get_db, Connection
 from services.user_service import UserService
 from models.user import User, UserCreate
 
@@ -16,6 +16,7 @@ import cv2
 import numpy as np
 import tempfile
 import os
+import uuid
 
 # --- Configuration for JWT --- #
 # TODO: Use environment variables for these in production
@@ -113,7 +114,12 @@ app.include_router(event_router, prefix="/api", tags=["Events"]) # New router
 app.include_router(match_team_statistics_router, prefix="/api", tags=["Match Team Statistics"]) # New router
 
 # Initialize the FootballAnalyzer for single image analysis (can be reused)
-single_image_analyzer = FootballAnalyzer()
+# MOVED to analysis_app.py
+
+# In-memory store for analysis status
+# MOVED to analysis_app.py
+
+# Analysis status endpoint moved to analysis_app.py
 
 @app.post("/api/token", tags=["Authentication"])
 async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Connection = Depends(get_db)):
@@ -163,44 +169,9 @@ async def register_user(user_create: UserCreate, db: Connection = Depends(get_db
 async def read_root():
     return {"message": "Welcome to the Football Match Analysis API"}
 
-@app.post("/detect", tags=["Analysis"])
-async def detect_objects_in_image(file: UploadFile = File(...), current_user: dict = Depends(get_current_active_user)):
-    """Analyzes a single image for player and ball detection."""
-    contents = await file.read()
-    np_image = np.frombuffer(contents, np.uint8)
-    image = cv2.imdecode(np_image, cv2.IMREAD_COLOR)
+# Image detection endpoint moved to analysis_app.py
 
-    if image is None:
-        raise HTTPException(status_code=400, detail="Could not decode image")
-
-    detected_objects = single_image_analyzer.analyze_single_image(image)
-    
-    # Convert numpy arrays/tuples in detected_objects to lists for JSON serialization
-    for obj in detected_objects:
-        if "color" in obj and isinstance(obj["color"], tuple):
-            obj["color"] = list(obj["color"])
-
-    # Example: Ensure all keys are serializable and match frontend expectations
-    return {"filename": file.filename, "detections": detected_objects}
-
-@app.post("/analyze_match", tags=["Analysis"])
-async def analyze_match_video(file: UploadFile = File(...), match_id: str = None, db: Connection = Depends(get_db), current_user: dict = Depends(get_current_active_user)):
-    """Analyzes a full football match video, saves results to the database, and returns summary statistics."""
-    try:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file.filename)[1]) as tmp_file:
-            tmp_file.write(await file.read())
-            video_path = tmp_file.name
-        
-        # Perform analysis
-        analysis_results = analyze_football_match(video_path, db, match_id or '')
-        # Ensure analysis_results is JSON serializable
-        return analysis_results
-    except Exception as e:
-        # Improved error handling for frontend
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        if 'video_path' in locals() and os.path.exists(video_path):
-            os.remove(video_path)
+# Match analysis endpoint moved to analysis_app.py
 
 # --- Authentication Example ---
 # If your frontend uses authentication, add dependencies to endpoints:
