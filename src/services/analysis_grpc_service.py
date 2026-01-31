@@ -1,7 +1,7 @@
 import grpc
 import os
 import logging
-from typing import Generator, Optional
+from typing import AsyncGenerator, Optional
 
 import analysis_pb2
 import analysis_pb2_grpc
@@ -18,18 +18,19 @@ class AnalysisGrpcService:
     def _get_stub(self):
         if not self.stub:
             target = f"{self.host}:{self.port}"
-            self.channel = grpc.insecure_channel(target)
+            # Use grpc.aio for async support
+            self.channel = grpc.aio.insecure_channel(target)
             self.stub = analysis_pb2_grpc.AnalysisEngineStub(self.channel)
         return self.stub
 
-    def analyze_video(
+    async def analyze_video(
         self, 
         video_path: str, 
         match_id: str, 
         calibration_path: str = "", 
         model_path: str = "",
         confidence_threshold: float = 0.5
-    ) -> Generator[analysis_pb2.VideoResponse, None, None]:
+    ) -> AsyncGenerator[analysis_pb2.VideoResponse, None]:
         """
         Sends a video analysis request to the gRPC server and yields progress updates.
         """
@@ -45,36 +46,28 @@ class AnalysisGrpcService:
         try:
             logger.info(f"Starting gRPC analysis for match {match_id} at {video_path}")
             responses = stub.AnalyzeVideo(request)
-            for response in responses:
+            async for response in responses:
                 yield response
         except grpc.RpcError as e:
-            logger.error(f"gRPC error during analysis for match {match_id}: {e.details()}")
-            # Yield a failure response if the connection fails
+            logger.error(f"gRPC error during analysis: {e.details()}")
             yield analysis_pb2.VideoResponse(
                 job_id=match_id,
                 status="FAILED",
                 message=f"gRPC Error: {e.details()}"
             )
-        except Exception as e:
-            logger.error(f"Unexpected error during gRPC analysis for match {match_id}: {e}")
-            yield analysis_pb2.VideoResponse(
-                job_id=match_id,
-                status="FAILED",
-                message=f"Unexpected Error: {str(e)}"
-            )
 
-    def stream_analysis(
+    async def stream_analysis(
         self,
-        chunks_generator: Generator[analysis_pb2.VideoChunk, None, None]
-    ) -> Generator[analysis_pb2.MetricsUpdate, None, None]:
+        chunks_generator: AsyncGenerator[analysis_pb2.VideoChunk, None]
+    ) -> AsyncGenerator[analysis_pb2.MetricsUpdate, None]:
         """
         Sends a stream of video chunks to the gRPC server and yields metrics updates.
         """
         stub = self._get_stub()
         try:
-            logger.info("Starting bi-directional streaming gRPC analysis")
+            logger.info("Starting bi-directional streaming gRPC analysis (Async)")
             responses = stub.StreamAnalysis(chunks_generator)
-            for response in responses:
+            async for response in responses:
                 yield response
         except grpc.RpcError as e:
             logger.error(f"gRPC error during streaming: {e.details()}")
@@ -82,15 +75,9 @@ class AnalysisGrpcService:
                 status="FAILED",
                 message=f"gRPC Error: {e.details()}"
             )
-        except Exception as e:
-            logger.error(f"Unexpected error during streaming: {e}")
-            yield analysis_pb2.MetricsUpdate(
-                status="FAILED",
-                message=f"Unexpected Error: {str(e)}"
-            )
 
-    def close(self):
+    async def close(self):
         if self.channel:
-            self.channel.close()
+            await self.channel.close()
             self.channel = None
             self.stub = None

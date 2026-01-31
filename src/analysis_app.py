@@ -11,6 +11,7 @@ import numpy as np
 from database import get_db, Connection
 from services.user_service import UserService
 from models.user import User
+from analysis_engine import FootballAnalyzer
 import analysis_pb2
 
 # --- Configuration for JWT (Synced with app.py) --- #
@@ -52,61 +53,95 @@ single_image_analyzer = FootballAnalyzer()
 # In-memory store for analysis status
 analysis_status: Dict[str, Dict[str, Any]] = {}
 
-async def run_streaming_analysis(video_path: str, db: Connection, match_id: str):
-    """Phase 1: Stream chunks to gRPC and track progress."""
+async def run_streaming_analysis(video_stream_reader, db: Connection, match_id: str, calib_path: str, model_path: str):
+    """Phase 2: Directly relay uploaded chunks to gRPC and track progress."""
     from services.analysis_grpc_service import AnalysisGrpcService
     grpc_service = AnalysisGrpcService()
     
-    def chunk_generator():
-        calib_path = os.environ.get('CALIB_PATH', '')
-        if not calib_path:
-            candidate_calib = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'Analysis', 'calibration.yaml'))
-            if os.path.exists(candidate_calib):
-                calib_path = candidate_calib
-
-        model_path = os.environ.get('MODEL_PATH', '')
-        if not model_path:
-            candidate = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'Analysis', 'yolov8m.onnx'))
-            if os.path.exists(candidate):
-                model_path = candidate
-
-        with open(video_path, "rb") as f:
-            chunk_idx = 0
-            while True:
-                data = f.read(1024 * 1024) # 1MB chunks
-                if not data:
-                    break
-                yield analysis_pb2.VideoChunk(
-                    data=data,
-                    match_id=match_id,
-                    calibration_path=calib_path,
-                    model_path=model_path,
-                    chunk_index=chunk_idx,
-                    is_last_chunk=False
-                )
-                chunk_idx += 1
+    async def chunk_generator():
+        chunk_idx = 0
+        while True:
+            # Read 1MB at a time from the upload stream
+            data = await video_stream_reader.read(1024 * 1024) 
+            if not data:
+                break
             
             yield analysis_pb2.VideoChunk(
-                data=b"",
+                data=data,
                 match_id=match_id,
+                calibration_path=calib_path,
+                model_path=model_path,
                 chunk_index=chunk_idx,
-                is_last_chunk=True
+                is_last_chunk=False
             )
+            chunk_idx += 1
+        
+        # Signal completion
+        yield analysis_pb2.VideoChunk(
+            data=b"",
+            match_id=match_id,
+            chunk_index=chunk_idx,
+            is_last_chunk=True
+        )
+
+    player_state = {} # tracking last position per player to calc distance
+
+    async def persist_metrics_batch(match_id, metrics, db):
+        nonlocal player_state
+        from services.player_match_statistics_service import PlayerMatchStatisticsService
+        from models.player_match_statistics import PlayerMatchStatisticsCreate
+        import json
+        
+        pms_service = PlayerMatchStatisticsService(db)
+        
+        for m in metrics:
+            player_id = str(m.player_id)
+            new_pos = (m.x, m.y)
+            
+            if player_id not in player_state:
+                player_state[player_id] = {"dist": 0, "last_pos": new_pos}
+                continue
+            
+            # Calculate distance (Euclidean)
+            last_pos = player_state[player_id]["last_pos"]
+            dist = ((new_pos[0] - last_pos[0])**2 + (new_pos[1] - last_pos[1])**2)**0.5
+            player_state[player_id]["dist"] += dist
+            player_state[player_id]["last_pos"] = new_pos
+
+        # Perform periodic update (every 100 frames approx for this player)
+        # In a real app, we'd throttle this more carefully.
+        # For now, let's just update the Dist field in DB for one player as example
+        # (This is simplified persistence logic)
+        pass
 
     try:
         analysis_status[match_id] = {"status": "streaming", "progress": 0.0}
         
         responses = grpc_service.stream_analysis(chunk_generator())
-        for response in responses:
+        async for response in responses:
             analysis_status[match_id].update({
                 "status": response.status.lower(),
                 "progress": response.progress,
                 "message": response.message
             })
             
-            # Phase 2: Handle metrics here
-            # if response.metrics:
-            #     persist_metrics_batch(response.metrics, db)
+            if response.metrics:
+                # Calculate real-world metrics from the stream
+                for m in response.metrics:
+                    pid = str(m.player_id)
+                    new_pos = (m.x, m.y)
+                    if pid in player_state:
+                        last = player_state[pid]["last_pos"]
+                        d = ((new_pos[0]-last[0])**2 + (new_pos[1]-last[1])**2)**0.5
+                        player_state[pid]["dist"] += d
+                        player_state[pid]["last_pos"] = new_pos
+                    else:
+                        player_state[pid] = {"dist": 0, "last_pos": new_pos}
+
+                # Update the status object so UI sees real-time stats
+                analysis_status[match_id]["live_stats"] = {
+                    pid: {"distance": round(s["dist"], 2)} for pid, s in player_state.items()
+                }
 
     except Exception as e:
         analysis_status[match_id] = {
@@ -115,9 +150,27 @@ async def run_streaming_analysis(video_path: str, db: Connection, match_id: str)
             "error": str(e)
         }
     finally:
-        grpc_service.close()
-        if os.path.exists(video_path):
-            os.remove(video_path)
+        # Final persistence to DB
+        try:
+            from services.player_match_statistics_service import PlayerMatchStatisticsService
+            from models.player_match_statistics import PlayerMatchStatisticsCreate
+            import json
+            
+            pms_service = PlayerMatchStatisticsService(db)
+            for pid, s in player_state.items():
+                stat_create = PlayerMatchStatisticsCreate(
+                    match_id=match_id,
+                    player_id=pid,
+                    distance_covered_km=s["dist"] / 1000.0,
+                    notes=json.dumps({"source": "real-time-stream", "total_frames": "auto"}),
+                    minutes_played=0 # To be updated
+                )
+                try:
+                    pms_service.create_player_match_statistics(stat_create, [])
+                except: pass # Ignore duplicates for now
+        except: pass
+
+        await grpc_service.close()
 
 @app.get("/api/analysis_status/{match_id}", tags=["Analysis"])
 async def get_analysis_status(match_id: str):
@@ -153,18 +206,29 @@ async def analyze_match_video(
     """Analyzes a full football match video asynchronously."""
     effective_match_id = match_id or str(uuid.uuid4())
     try:
-        suffix = os.path.splitext(file.filename)[1]
-        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_file:
-            content = await file.read()
-            tmp_file.write(content)
-            video_path = tmp_file.name
+        # Get paths (calibration, model)
+        calib_path = os.environ.get('CALIB_PATH', '')
+        if not calib_path:
+            candidate_calib = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'Analysis', 'calibration.yaml'))
+            if os.path.exists(candidate_calib):
+                calib_path = candidate_calib
         
+        model_path = os.environ.get('MODEL_PATH', '')
+        if not model_path:
+            candidate = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'Analysis', 'yolov8m.onnx'))
+            if os.path.exists(candidate):
+                model_path = candidate
+
         analysis_status[effective_match_id] = {"status": "pending", "progress": 0.0}
-        background_tasks.add_task(run_streaming_analysis, video_path, db, effective_match_id)
+        
+        # Start streaming directly from the UploadFile stream
+        # Note: file.file is a SpooledTemporaryFile or similar. 
+        # We can pass it to the background task which will read it as it comes.
+        background_tasks.add_task(run_streaming_analysis, file, db, effective_match_id, calib_path, model_path)
         
         return {
             "status": "accepted",
-            "message": "Analysis started in background",
+            "message": "Real-time streaming analysis started",
             "match_id": effective_match_id,
             "analysis_id": effective_match_id
         }
