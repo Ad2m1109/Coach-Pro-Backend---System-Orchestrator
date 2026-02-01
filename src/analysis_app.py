@@ -16,9 +16,20 @@ from models.user import User
 from analysis_engine import FootballAnalyzer
 import analysis_pb2
 
-# --- Configuration for JWT (Synced with app.py) --- #
-SECRET_KEY = "your-secret-key"
-ALGORITHM = "HS256"
+# --- Configuration for JWT (RS256 - Public Key Verification Only) --- #
+import os
+
+if os.path.exists("certs/public.pem"):
+    PUBLIC_KEY_PATH = os.path.join("certs", "public.pem")
+elif os.path.exists("../certs/public.pem"):
+    PUBLIC_KEY_PATH = os.path.join("../certs", "public.pem")
+else:
+    PUBLIC_KEY_PATH = "/home/ademyoussfi/Desktop/Projects/football-coach/backend/certs/public.pem"
+
+with open(PUBLIC_KEY_PATH, "r") as f:
+    RSA_PUBLIC_KEY = f.read()
+
+ALGORITHM = "RS256"
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/token")
 
 async def get_current_user(token: str = Depends(oauth2_scheme), db: Connection = Depends(get_db)):
@@ -27,8 +38,10 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Connection =
         detail="Could not validate credentials",
     )
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        payload = jwt.decode(token, RSA_PUBLIC_KEY, algorithms=[ALGORITHM])
         email: str = payload.get("sub")
+        # Optimization: We can also access payload.get("club_id") or payload.get("role") here
+        # to enforce authorization without any database lookups in this tier.
         if email is None:
             raise credentials_exception
     except JWTError:
@@ -61,25 +74,36 @@ app.add_middleware(
 single_image_analyzer = FootballAnalyzer()
 
 
-async def update_report_status(db, match_id_or_report_id, status_str, progress=0.0, message="", live_stats=None):
-    """Helper to update analysis_reports in DB."""
+async def update_report_status(match_id_or_report_id, status_str, progress=0.0, message="", live_stats=None):
+    """Helper to update analysis_reports in DB. Acquires a fresh connection."""
     import json
-    with db.cursor() as cursor:
-        # We find the latest report for this match or by report id
-        report_data = {
-            "status": status_str.upper(),
-            "progress": progress,
-            "message": message,
-            "timestamp": "now"
-        }
-        if live_stats:
-            report_data["live_stats"] = live_stats
-            
-        sql = "UPDATE analysis_reports SET report_data = %s WHERE match_id = %s OR id = %s"
-        cursor.execute(sql, (json.dumps(report_data), match_id_or_report_id, match_id_or_report_id))
-        db.commit()
+    
+    # Manually handle the get_db generator since it's not a context manager
+    db_gen = get_db()
+    db = next(db_gen)
+    try:
+        with db.cursor() as cursor:
+            # We find the latest report for this match or by report id
+            report_data = {
+                "status": status_str.upper(),
+                "progress": progress,
+                "message": message,
+                "timestamp": "now"
+            }
+            if live_stats:
+                report_data["live_stats"] = live_stats
+                
+            sql = "UPDATE analysis_reports SET report_data = %s WHERE match_id = %s OR id = %s"
+            cursor.execute(sql, (json.dumps(report_data), match_id_or_report_id, match_id_or_report_id))
+            db.commit()
+    finally:
+        # Ensure connection is closed
+        try:
+            next(db_gen)
+        except StopIteration:
+            pass
 
-async def run_streaming_analysis_from_disk(file_path: str, db: Connection, match_id: str, calib_path: str, model_path: str):
+async def run_streaming_analysis_from_disk(file_path: str, db_ignored: Connection, match_id: str, calib_path: str, model_path: str):
     """Phase 2: Relay file chunks from disk to gRPC and track progress."""
     from services.analysis_grpc_service import AnalysisGrpcService
     from services.player_match_statistics_service import PlayerMatchStatisticsService
@@ -87,7 +111,9 @@ async def run_streaming_analysis_from_disk(file_path: str, db: Connection, match
     import json
 
     grpc_service = AnalysisGrpcService()
-    pms_service = PlayerMatchStatisticsService(db)
+    # PMS Service isn't strictly needed here as we do raw SQL upserts for performance,
+    # but let's initialize it correctly if we were to use it.
+    # pms_service = PlayerMatchStatisticsService(db) # REMOVED to fix NameError
     
     async def chunk_generator():
         chunk_idx = 0
@@ -107,7 +133,7 @@ async def run_streaming_analysis_from_disk(file_path: str, db: Connection, match
     frame_counter = 0
 
     try:
-        await update_report_status(db, match_id, "PROCESSING", 0.0, "Starting gRPC stream...")
+        await update_report_status(match_id, "PROCESSING", 0.0, "Starting gRPC stream...")
         
         responses = grpc_service.stream_analysis(chunk_generator())
         async for response in responses:
@@ -128,7 +154,7 @@ async def run_streaming_analysis_from_disk(file_path: str, db: Connection, match
             # Incremental DB update every 100 iterations (approx 500 frames due to throttling in C++)
             if frame_counter % 20 == 0:
                 live_summary = {pid: {"distance": round(s["dist"], 2)} for pid, s in player_state.items()}
-                await update_report_status(db, match_id, "PROCESSING", response.progress, response.message, live_summary)
+                await update_report_status(match_id, "PROCESSING", response.progress, response.message, live_summary)
                 
                 # Batch upsert to player_match_statistics
                 for pid, s in player_state.items():
@@ -141,19 +167,25 @@ async def run_streaming_analysis_from_disk(file_path: str, db: Connection, match
                     try:
                         # Simple logic: if db_id is None, create; but actually we should use an upsert
                         # For now, we'll use a raw SQL UPSERT for performance
-                        with db.cursor() as cursor:
-                            sql = """INSERT INTO player_match_statistics (id, match_id, player_id, distance_covered_km, notes) 
-                                     VALUES (UUID(), %s, %s, %s, %s) 
-                                     ON DUPLICATE KEY UPDATE distance_covered_km = %s, notes = %s"""
-                            cursor.execute(sql, (match_id, pid, stat_create.distance_covered_km, stat_create.notes, 
-                                                 stat_create.distance_covered_km, stat_create.notes))
-                            db.commit()
+                        db_gen = get_db()
+                        fresh_db = next(db_gen)
+                        try:
+                            with fresh_db.cursor() as cursor:
+                                sql = """INSERT INTO player_match_statistics (id, match_id, player_id, distance_covered_km, notes) 
+                                         VALUES (UUID(), %s, %s, %s, %s) 
+                                         ON DUPLICATE KEY UPDATE distance_covered_km = %s, notes = %s"""
+                                cursor.execute(sql, (match_id, pid, stat_create.distance_covered_km, stat_create.notes, 
+                                                     stat_create.distance_covered_km, stat_create.notes))
+                                fresh_db.commit()
+                        finally:
+                            try: next(db_gen)
+                            except StopIteration: pass
                     except: pass
 
-        await update_report_status(db, match_id, "COMPLETED", 1.0, "Analysis complete")
+        await update_report_status(match_id, "COMPLETED", 1.0, "Analysis complete")
 
     except Exception as e:
-        await update_report_status(db, match_id, "FAILED", 0.0, f"Error: {str(e)}")
+        await update_report_status(match_id, "FAILED", 0.0, f"Error: {str(e)}")
     finally:
         await grpc_service.close()
         if os.path.exists(file_path):

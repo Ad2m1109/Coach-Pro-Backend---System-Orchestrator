@@ -18,10 +18,27 @@ import tempfile
 import os
 import uuid
 
-# --- Configuration for JWT --- #
-# TODO: Use environment variables for these in production
-SECRET_KEY = "your-secret-key" # openssl rand -hex 32
-ALGORITHM = "HS256"
+# --- Configuration for JWT (RS256) --- #
+# RSA keys generated via OpenSSL
+# Try to find certs in current dir or parent dir
+if os.path.exists("certs/private.pem"):
+    PRIVATE_KEY_PATH = os.path.join("certs", "private.pem")
+    PUBLIC_KEY_PATH = os.path.join("certs", "public.pem")
+elif os.path.exists("../certs/private.pem"):
+    PRIVATE_KEY_PATH = os.path.join("../certs", "private.pem")
+    PUBLIC_KEY_PATH = os.path.join("../certs", "public.pem")
+else:
+    # Fallback/Debug path
+    PRIVATE_KEY_PATH = "/home/ademyoussfi/Desktop/Projects/football-coach/backend/certs/private.pem"
+    PUBLIC_KEY_PATH = "/home/ademyoussfi/Desktop/Projects/football-coach/backend/certs/public.pem"
+
+with open(PRIVATE_KEY_PATH, "r") as f:
+    RSA_PRIVATE_KEY = f.read()
+
+with open(PUBLIC_KEY_PATH, "r") as f:
+    RSA_PUBLIC_KEY = f.read()
+
+ALGORITHM = "RS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/token")
@@ -33,7 +50,8 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     else:
         expire = datetime.utcnow() + timedelta(minutes=15)
     to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    # jose uses python-jose[cryptography] for RS256 support
+    encoded_jwt = jwt.encode(to_encode, RSA_PRIVATE_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
 async def get_current_user(token: str = Depends(oauth2_scheme), db: Connection = Depends(get_db)):
@@ -43,7 +61,7 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Connection =
         headers={"WWW-Authenticate": "Bearer"},
     )
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        payload = jwt.decode(token, RSA_PUBLIC_KEY, algorithms=[ALGORITHM])
         email: str = payload.get("sub")
         if email is None:
             raise credentials_exception
@@ -143,9 +161,21 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
         )
 
     # Case 3: Success
+    # Get user team/club for claims
+    from services.team_service import TeamService
+    team_service = TeamService(db)
+    user_teams = team_service.get_all_teams(user.id)
+    club_id = user_teams[0].id if user_teams else "no-club"
+
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
-        data={"sub": user.email}, expires_delta=access_token_expires
+        data={
+            "sub": user.email,
+            "role": "coach", # Default role
+            "club_id": club_id,
+            "permissions": ["video_analysis", "tactics_editor"]
+        }, 
+        expires_delta=access_token_expires
     )
     return {"access_token": access_token, "token_type": "bearer"}
 
