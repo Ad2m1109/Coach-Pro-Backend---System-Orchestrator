@@ -140,6 +140,7 @@ CREATE TABLE player_match_statistics (
     defensive_coverage_km DECIMAL(5,2) DEFAULT 0.0,
     notes TEXT,
     rating DECIMAL(3,1),
+    UNIQUE KEY (match_id, player_id),
     FOREIGN KEY (match_id) REFERENCES matches(id) ON DELETE CASCADE,
     FOREIGN KEY (player_id) REFERENCES players(id) ON DELETE CASCADE
 );
@@ -151,6 +152,7 @@ CREATE TABLE analysis_reports (
     report_data JSON,
     generated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     generated_by CHAR(36),
+    UNIQUE KEY (match_id), -- One report per match for simplicity in this version
     FOREIGN KEY (match_id) REFERENCES matches(id) ON DELETE CASCADE,
     FOREIGN KEY (generated_by) REFERENCES users(id)
 );

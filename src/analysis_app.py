@@ -60,56 +60,60 @@ app.add_middleware(
 # Initialize the FootballAnalyzer
 single_image_analyzer = FootballAnalyzer()
 
-# In-memory store for analysis status
-analysis_status: Dict[str, Dict[str, Any]] = {}
+
+async def update_report_status(db, match_id_or_report_id, status_str, progress=0.0, message="", live_stats=None):
+    """Helper to update analysis_reports in DB."""
+    import json
+    with db.cursor() as cursor:
+        # We find the latest report for this match or by report id
+        report_data = {
+            "status": status_str.upper(),
+            "progress": progress,
+            "message": message,
+            "timestamp": "now"
+        }
+        if live_stats:
+            report_data["live_stats"] = live_stats
+            
+        sql = "UPDATE analysis_reports SET report_data = %s WHERE match_id = %s OR id = %s"
+        cursor.execute(sql, (json.dumps(report_data), match_id_or_report_id, match_id_or_report_id))
+        db.commit()
 
 async def run_streaming_analysis_from_disk(file_path: str, db: Connection, match_id: str, calib_path: str, model_path: str):
     """Phase 2: Relay file chunks from disk to gRPC and track progress."""
     from services.analysis_grpc_service import AnalysisGrpcService
+    from services.player_match_statistics_service import PlayerMatchStatisticsService
+    from models.player_match_statistics import PlayerMatchStatisticsCreate
+    import json
+
     grpc_service = AnalysisGrpcService()
+    pms_service = PlayerMatchStatisticsService(db)
     
     async def chunk_generator():
         chunk_idx = 0
         with open(file_path, "rb") as f:
             while True:
-                # Read 1MB at a time from disk
                 data = f.read(1024 * 1024) 
                 if not data:
                     break
-                
                 yield analysis_pb2.VideoChunk(
-                    data=data,
-                    match_id=match_id,
-                    calibration_path=calib_path,
-                    model_path=model_path,
-                    chunk_index=chunk_idx,
-                    is_last_chunk=False
+                    data=data, match_id=match_id, calibration_path=calib_path,
+                    model_path=model_path, chunk_index=chunk_idx, is_last_chunk=False
                 )
                 chunk_idx += 1
-        
-        # Signal completion
-        yield analysis_pb2.VideoChunk(
-            data=b"",
-            match_id=match_id,
-            chunk_index=chunk_idx,
-            is_last_chunk=True
-        )
+        yield analysis_pb2.VideoChunk(data=b"", match_id=match_id, chunk_index=chunk_idx, is_last_chunk=True)
 
-    player_state = {} # tracking last position per player to calc distance
+    player_state = {} # tracking last position and DB record ID
+    frame_counter = 0
 
     try:
-        analysis_status[match_id] = {"status": "streaming", "progress": 0.0}
+        await update_report_status(db, match_id, "PROCESSING", 0.0, "Starting gRPC stream...")
         
         responses = grpc_service.stream_analysis(chunk_generator())
         async for response in responses:
-            analysis_status[match_id].update({
-                "status": response.status.lower(),
-                "progress": response.progress,
-                "message": response.message
-            })
+            frame_counter += 1
             
             if response.metrics:
-                # Calculate real-world metrics from the stream
                 for m in response.metrics:
                     pid = str(m.player_id)
                     new_pos = (m.x, m.y)
@@ -119,54 +123,58 @@ async def run_streaming_analysis_from_disk(file_path: str, db: Connection, match
                         player_state[pid]["dist"] += d
                         player_state[pid]["last_pos"] = new_pos
                     else:
-                        player_state[pid] = {"dist": 0, "last_pos": new_pos}
+                        player_state[pid] = {"dist": 0, "last_pos": new_pos, "db_id": None}
 
-                # Update the status object so UI sees real-time stats
-                analysis_status[match_id]["live_stats"] = {
-                    pid: {"distance": round(s["dist"], 2)} for pid, s in player_state.items()
-                }
+            # Incremental DB update every 100 iterations (approx 500 frames due to throttling in C++)
+            if frame_counter % 20 == 0:
+                live_summary = {pid: {"distance": round(s["dist"], 2)} for pid, s in player_state.items()}
+                await update_report_status(db, match_id, "PROCESSING", response.progress, response.message, live_summary)
+                
+                # Batch upsert to player_match_statistics
+                for pid, s in player_state.items():
+                    stat_create = PlayerMatchStatisticsCreate(
+                        match_id=match_id, player_id=pid,
+                        distance_covered_km=s["dist"] / 1000.0,
+                        notes=json.dumps({"realtime": True, "frame": frame_counter}),
+                        minutes_played=0
+                    )
+                    try:
+                        # Simple logic: if db_id is None, create; but actually we should use an upsert
+                        # For now, we'll use a raw SQL UPSERT for performance
+                        with db.cursor() as cursor:
+                            sql = """INSERT INTO player_match_statistics (id, match_id, player_id, distance_covered_km, notes) 
+                                     VALUES (UUID(), %s, %s, %s, %s) 
+                                     ON DUPLICATE KEY UPDATE distance_covered_km = %s, notes = %s"""
+                            cursor.execute(sql, (match_id, pid, stat_create.distance_covered_km, stat_create.notes, 
+                                                 stat_create.distance_covered_km, stat_create.notes))
+                            db.commit()
+                    except: pass
+
+        await update_report_status(db, match_id, "COMPLETED", 1.0, "Analysis complete")
 
     except Exception as e:
-        analysis_status[match_id] = {
-            "status": "failed",
-            "progress": 0.0,
-            "error": str(e)
-        }
+        await update_report_status(db, match_id, "FAILED", 0.0, f"Error: {str(e)}")
     finally:
-        # Final persistence to DB
-        try:
-            from services.player_match_statistics_service import PlayerMatchStatisticsService
-            from models.player_match_statistics import PlayerMatchStatisticsCreate
-            import json
-            
-            pms_service = PlayerMatchStatisticsService(db)
-            for pid, s in player_state.items():
-                stat_create = PlayerMatchStatisticsCreate(
-                    match_id=match_id,
-                    player_id=pid,
-                    distance_covered_km=s["dist"] / 1000.0,
-                    notes=json.dumps({"source": "real-time-stream", "total_frames": "auto"}),
-                    minutes_played=0 # To be updated
-                )
-                try:
-                    pms_service.create_player_match_statistics(stat_create, [])
-                except: pass
-        except: pass
-
         await grpc_service.close()
-        
-        # Cleanup temp file
         if os.path.exists(file_path):
-            try:
-                os.remove(file_path)
+            try: os.remove(file_path)
             except: pass
 
 @app.get("/api/analysis_status/{match_id}", tags=["Analysis"])
-async def get_analysis_status(match_id: str):
-    """Check the status of a video analysis task."""
-    if match_id not in analysis_status:
-        raise HTTPException(status_code=404, detail="Analysis task not found")
-    return analysis_status[match_id]
+async def get_analysis_status(match_id: str, db: Connection = Depends(get_db)):
+    """Check the status of a video analysis task from the database."""
+    import json
+    with db.cursor() as cursor:
+        sql = "SELECT report_data FROM analysis_reports WHERE match_id = %s ORDER BY generated_at DESC LIMIT 1"
+        cursor.execute(sql, (match_id,))
+        report = cursor.fetchone()
+        if not report:
+            raise HTTPException(status_code=404, detail="Analysis task not found")
+        
+        data = report['report_data']
+        if isinstance(data, str):
+            data = json.loads(data)
+        return data
 
 @app.post("/api/detect", tags=["Analysis"])
 async def detect_objects_in_image(file: UploadFile = File(...)):
@@ -232,11 +240,11 @@ async def analyze_match_video(
             created_match = match_service.create_match(match_create, user_team_ids)
             effective_match_id = created_match.id
 
-        # 3. Create Analysis Report immediately (So it shows in History)
+        # 3. Create Analysis Report immediately (QUEUED state)
         report_create = AnalysisReportCreate(
             match_id=effective_match_id,
             report_type="Video Analysis",
-            report_data={"status": "initializing", "timestamp": datetime.now().isoformat()},
+            report_data={"status": "QUEUED", "progress": 0.0, "timestamp": datetime.now().isoformat()},
             generated_by=current_user.id
         )
         report_service.create_analysis_report(report_create, user_team_ids)
@@ -261,7 +269,6 @@ async def analyze_match_video(
             if os.path.exists(candidate):
                 model_path = candidate
         
-        analysis_status[effective_match_id] = {"status": "analyzing", "progress": 0.0}
         background_tasks.add_task(run_streaming_analysis_from_disk, file_path, db, effective_match_id, calib_path, model_path)
         
         return {
