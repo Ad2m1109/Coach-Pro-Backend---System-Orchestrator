@@ -9,9 +9,12 @@ The **Coach Pro Backend** functions as the **Business Logic Orchestrator** in a 
 ### Architecture Position
 
 ```
-Flutter Client (REST) → FastAPI Orchestrator (gRPC) → C++ Inference Engine
-                              ↓
-                        MySQL Database
+      Flutter Client (REST)
+      /                  \
+   (8000)               (8001)
+Classic Backend  ↔  Analysis Management ↔ C++ Inference Engine
+      ↓                  ↓                     (gRPC:50051)
+MySQL DB         Buffering (Disk)
 ```
 
 ## Core Responsibilities
@@ -119,10 +122,19 @@ Pydantic models ensure type-safe request/response handling with automatic valida
 
 ## Running the Service
 
-### Development Mode
-```bash
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
-```
+### Running the Services
+
+The system uses a split-backend architecture:
+
+1. **Classic Backend (CRUD & Management):**
+   ```bash
+   uvicorn app:app --reload --host 0.0.0.0 --port 8000
+   ```
+
+2. **Analysis API (Video Processing):**
+   ```bash
+   uvicorn analysis_app:app --reload --host 0.0.0.0 --port 8001
+   ```
 
 ### Production Mode
 ```bash
@@ -224,34 +236,29 @@ POST /api/match_lineups
 
 ## Data Flow Architecture
 
-### Video Processing Pipeline
+### Video Analysis & Matching Workflow
 
-1. **Upload Phase**
-   - Client uploads video via multipart/form-data
-   - FastAPI validates file format and size
-   - Video stored in `/uploads` directory
-   - Job record created in database with `PENDING` status
+The system follows a strict sequential workflow to ensure data integrity and real-time feedback:
 
-2. **Processing Phase**
-   - FastAPI sends gRPC request to C++ engine:
-     ```protobuf
-     message VideoRequest {
-       string video_path = 1;
-       string calibration_path = 2;
-       float confidence_threshold = 3;
-     }
-     ```
-   - Engine streams frame-level results back via gRPC
-   - Job status updated to `PROCESSING` with progress tracking
+1. **Upload & Buffering (Synchronous)**
+   - Client uploads video via `POST /api/analyze_match` (Multipart).
+   - Backend provides real-time progress for the **sending** phase.
+   - Video is buffered to disk in `temp_uploads/` to ensure persistence for background tasks.
 
-3. **Persistence Phase**
-   - Receive CSV-formatted metrics from engine
-   - Parse and normalize data (players, ball, events)
-   - Bulk insert into MySQL tables:
-     - `player_match_statistics`
-     - `ball_positions`
-     - `analysis_reports`
-   - Job status updated to `COMPLETED`
+2. **Database Registration (Instant)**
+   - Once upload is complete, the backend immediately creates:
+     - A `Match` record (if not provided).
+     - An `AnalysisReport` record with `initializing` status.
+   - This ensures the analysis is visible in the **Match History** instantly.
+
+3. **Background Analysis (Asynchronous)**
+   - A background task starts `run_streaming_analysis_from_disk`.
+   - Video chunks are read from disk and streamed to the C++ Engine via gRPC.
+   - Analysis status is updated in real-time (`streaming` → `analyzing` → `completed`).
+   - Final metrics are persisted to the database.
+
+4. **Cleanup**
+   - Upon completion or failure, the temporary video file is automatically removed from the server.
 
 4. **Retrieval Phase**
    - Frontend queries REST API for structured results

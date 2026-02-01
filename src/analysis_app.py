@@ -27,20 +27,16 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Connection =
         detail="Could not validate credentials",
     )
     try:
-        print(f"DEBUG: Received token: {token[:10]}...")
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         email: str = payload.get("sub")
-        print(f"DEBUG: Token payload sub (email): {email}")
         if email is None:
             raise credentials_exception
-    except JWTError as e:
-        print(f"DEBUG: JWT Decode Error: {str(e)}")
+    except JWTError:
         raise credentials_exception
     
     user_service = UserService(db)
     user = user_service.get_user_by_email(email=email)
     if user is None:
-        print(f"DEBUG: User not found in DB for email: {email}")
         raise credentials_exception
     return user
 
@@ -100,34 +96,6 @@ async def run_streaming_analysis_from_disk(file_path: str, db: Connection, match
         )
 
     player_state = {} # tracking last position per player to calc distance
-
-    async def persist_metrics_batch(match_id, metrics, db):
-        nonlocal player_state
-        from services.player_match_statistics_service import PlayerMatchStatisticsService
-        from models.player_match_statistics import PlayerMatchStatisticsCreate
-        import json
-        
-        pms_service = PlayerMatchStatisticsService(db)
-        
-        for m in metrics:
-            player_id = str(m.player_id)
-            new_pos = (m.x, m.y)
-            
-            if player_id not in player_state:
-                player_state[player_id] = {"dist": 0, "last_pos": new_pos}
-                continue
-            
-            # Calculate distance (Euclidean)
-            last_pos = player_state[player_id]["last_pos"]
-            dist = ((new_pos[0] - last_pos[0])**2 + (new_pos[1] - last_pos[1])**2)**0.5
-            player_state[player_id]["dist"] += dist
-            player_state[player_id]["last_pos"] = new_pos
-
-        # Perform periodic update (every 100 frames approx for this player)
-        # In a real app, we'd throttle this more carefully.
-        # For now, let's just update the Dist field in DB for one player as example
-        # (This is simplified persistence logic)
-        pass
 
     try:
         analysis_status[match_id] = {"status": "streaming", "progress": 0.0}
