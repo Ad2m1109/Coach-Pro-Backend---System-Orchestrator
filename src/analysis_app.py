@@ -1,5 +1,6 @@
 from fastapi import FastAPI, Depends, File, UploadFile, HTTPException, status, BackgroundTasks, Form
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from typing import Optional, Dict, Any
 import os
@@ -7,6 +8,7 @@ import uuid
 import tempfile
 import cv2
 import numpy as np
+import shutil
 
 from database import get_db, Connection
 from services.user_service import UserService
@@ -17,21 +19,33 @@ import analysis_pb2
 # --- Configuration for JWT (Synced with app.py) --- #
 SECRET_KEY = "your-secret-key"
 ALGORITHM = "HS256"
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/token")
 
-async def get_current_user(token: str = Depends(os.environ.get('OAUTH2_SCHEME', 'api/token')), db: Connection = Depends(get_db)):
-    # Simple auth check (simplified for analysis service)
-    # Ideally should share a common auth library
+async def get_current_user(token: str = Depends(oauth2_scheme), db: Connection = Depends(get_db)):
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
     )
     try:
-        # Note: Analysis app might be behind a gateway or handle its own token validation
-        # For simplicity, we'll keep it similar to app.py
-        pass 
-    except JWTError:
+        print(f"DEBUG: Received token: {token[:10]}...")
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        email: str = payload.get("sub")
+        print(f"DEBUG: Token payload sub (email): {email}")
+        if email is None:
+            raise credentials_exception
+    except JWTError as e:
+        print(f"DEBUG: JWT Decode Error: {str(e)}")
         raise credentials_exception
-    return None # Placeholder or implement full check
+    
+    user_service = UserService(db)
+    user = user_service.get_user_by_email(email=email)
+    if user is None:
+        print(f"DEBUG: User not found in DB for email: {email}")
+        raise credentials_exception
+    return user
+
+async def get_current_active_user(current_user: User = Depends(get_current_user)):
+    return current_user
 
 app = FastAPI(
     title="Football Analysis Management Service",
@@ -53,28 +67,29 @@ single_image_analyzer = FootballAnalyzer()
 # In-memory store for analysis status
 analysis_status: Dict[str, Dict[str, Any]] = {}
 
-async def run_streaming_analysis(video_stream_reader, db: Connection, match_id: str, calib_path: str, model_path: str):
-    """Phase 2: Directly relay uploaded chunks to gRPC and track progress."""
+async def run_streaming_analysis_from_disk(file_path: str, db: Connection, match_id: str, calib_path: str, model_path: str):
+    """Phase 2: Relay file chunks from disk to gRPC and track progress."""
     from services.analysis_grpc_service import AnalysisGrpcService
     grpc_service = AnalysisGrpcService()
     
     async def chunk_generator():
         chunk_idx = 0
-        while True:
-            # Read 1MB at a time from the upload stream
-            data = await video_stream_reader.read(1024 * 1024) 
-            if not data:
-                break
-            
-            yield analysis_pb2.VideoChunk(
-                data=data,
-                match_id=match_id,
-                calibration_path=calib_path,
-                model_path=model_path,
-                chunk_index=chunk_idx,
-                is_last_chunk=False
-            )
-            chunk_idx += 1
+        with open(file_path, "rb") as f:
+            while True:
+                # Read 1MB at a time from disk
+                data = f.read(1024 * 1024) 
+                if not data:
+                    break
+                
+                yield analysis_pb2.VideoChunk(
+                    data=data,
+                    match_id=match_id,
+                    calibration_path=calib_path,
+                    model_path=model_path,
+                    chunk_index=chunk_idx,
+                    is_last_chunk=False
+                )
+                chunk_idx += 1
         
         # Signal completion
         yield analysis_pb2.VideoChunk(
@@ -167,10 +182,16 @@ async def run_streaming_analysis(video_stream_reader, db: Connection, match_id: 
                 )
                 try:
                     pms_service.create_player_match_statistics(stat_create, [])
-                except: pass # Ignore duplicates for now
+                except: pass
         except: pass
 
         await grpc_service.close()
+        
+        # Cleanup temp file
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except: pass
 
 @app.get("/api/analysis_status/{match_id}", tags=["Analysis"])
 async def get_analysis_status(match_id: str):
@@ -201,12 +222,65 @@ async def analyze_match_video(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     match_id: Optional[str] = Form(None),
-    db: Connection = Depends(get_db)
+    db: Connection = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
-    """Analyzes a full football match video asynchronously."""
-    effective_match_id = match_id or str(uuid.uuid4())
+    """Analyzes a full football match video synchronously for upload, then async for analysis."""
+    effective_match_id = match_id
     try:
-        # Get paths (calibration, model)
+        from services.match_service import MatchService
+        from services.analysis_report_service import AnalysisReportService
+        from services.team_service import TeamService
+        from models.match import MatchCreate, MatchStatusEnum
+        from models.analysis_report import AnalysisReportCreate
+        from models.team import TeamCreate
+        from datetime import datetime
+
+        match_service = MatchService(db)
+        report_service = AnalysisReportService(db)
+        team_service = TeamService(db)
+
+        # 1. Get user teams to associate the match
+        teams = team_service.get_all_teams(current_user.id)
+        if not teams:
+            # Create a default team if none exists
+            team_create = TeamCreate(name="My Team", primary_color="#000000", secondary_color="#FFFFFF")
+            default_team = team_service.create_team(team_create, current_user.id)
+            home_team_id = default_team.id
+        else:
+            home_team_id = teams[0].id
+
+        # 2. Create Match if it doesn't exist
+        user_team_ids = [t.id for t in teams]
+        if not effective_match_id:
+            # Create a placeholder match
+            match_create = MatchCreate(
+                home_team_id=home_team_id,
+                away_team_id=home_team_id, # Self match for placeholder
+                date_time=datetime.now(),
+                venue="Local Pitch",
+                status=MatchStatusEnum.live
+            )
+            created_match = match_service.create_match(match_create, user_team_ids)
+            effective_match_id = created_match.id
+
+        # 3. Create Analysis Report immediately (So it shows in History)
+        report_create = AnalysisReportCreate(
+            match_id=effective_match_id,
+            report_type="Video Analysis",
+            report_data={"status": "initializing", "timestamp": datetime.now().isoformat()},
+            generated_by=current_user.id
+        )
+        report_service.create_analysis_report(report_create, user_team_ids)
+
+        # 4. Save file to disk because UploadFile might be closed after request returns
+        upload_dir = "temp_uploads"
+        os.makedirs(upload_dir, exist_ok=True)
+        file_path = os.path.join(upload_dir, f"{effective_match_id}_{file.filename}")
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+
+        # 5. Start async analysis from the saved file
         calib_path = os.environ.get('CALIB_PATH', '')
         if not calib_path:
             candidate_calib = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'Analysis', 'calibration.yaml'))
@@ -218,17 +292,13 @@ async def analyze_match_video(
             candidate = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'Analysis', 'yolov8m.onnx'))
             if os.path.exists(candidate):
                 model_path = candidate
-
-        analysis_status[effective_match_id] = {"status": "pending", "progress": 0.0}
         
-        # Start streaming directly from the UploadFile stream
-        # Note: file.file is a SpooledTemporaryFile or similar. 
-        # We can pass it to the background task which will read it as it comes.
-        background_tasks.add_task(run_streaming_analysis, file, db, effective_match_id, calib_path, model_path)
+        analysis_status[effective_match_id] = {"status": "analyzing", "progress": 0.0}
+        background_tasks.add_task(run_streaming_analysis_from_disk, file_path, db, effective_match_id, calib_path, model_path)
         
         return {
             "status": "accepted",
-            "message": "Real-time streaming analysis started",
+            "message": "Upload complete, analysis record created in history.",
             "match_id": effective_match_id,
             "analysis_id": effective_match_id
         }
