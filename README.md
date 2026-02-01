@@ -12,8 +12,9 @@ The **Coach Pro Backend** functions as the **Business Logic Orchestrator** in a 
       Flutter Client (REST)
       /                  \
    (8000)               (8001)
-Classic Backend  ↔  Analysis Management ↔ C++ Inference Engine
-      ↓                  ↓                     (gRPC:50051)
+Classic Backend  →  Analysis Management ↔ C++ Inference Engine
+(Signs Token)       (Verifies Token)      (gRPC:50051)
+      ↓                  ↓
 MySQL DB         Buffering (Disk)
 ```
 
@@ -99,14 +100,30 @@ Pydantic models ensure type-safe request/response handling with automatic valida
    ANALYSIS_ENGINE_PORT=50051
    
    # Application Settings
-   SECRET_KEY=your-secret-key-here
-   DEBUG=False
-   CORS_ORIGINS=["http://localhost:3000"]
+    # SECRET_KEY is no longer used. See "JWT Configuration" below.
+    DEBUG=False
+    CORS_ORIGINS=["http://localhost:3000"]
    
    # File Storage
-   UPLOAD_DIR=/var/coach_pro/uploads
-   MAX_UPLOAD_SIZE_MB=500
+    UPLOAD_DIR=/var/coach_pro/uploads
+    MAX_UPLOAD_SIZE_MB=500
    ```
+
+5. **Generate RSA Keys (Crucial Step):**
+   The system uses RS256 Asymmetric Authentication. You must generate a key pair in the `certs/` directory.
+
+   ```bash
+   mkdir -p certs
+   # Generate Private Key (for Classic Backend / Auth Authority)
+   openssl genrsa -out certs/private.pem 2048
+   
+   # Extract Public Key (for Analysis Backend / Verifier)
+   openssl rsa -in certs/private.pem -outform PEM -pubout -out certs/public.pem
+   ```
+
+   **Security Model:**
+   - **Classic Backend (Port 8000)**: Uses `private.pem` to SIGN tokens.
+   - **Analysis Backend (Port 8001)**: Uses `public.pem` to VERIFY tokens.
 
 5. **Initialize the database:**
    ```bash
@@ -319,7 +336,8 @@ This validates end-to-end data persistence without running the C++ engine.
 | `DB_NAME` | Database name | `coach_pro_db` |
 | `ANALYSIS_ENGINE_HOST` | C++ engine gRPC host | `localhost` |
 | `ANALYSIS_ENGINE_PORT` | C++ engine gRPC port | `50051` |
-| `SECRET_KEY` | JWT signing key | (required) |
+| `RSA_PRIVATE_KEY` | Path to private key | `certs/private.pem` |
+| `RSA_PUBLIC_KEY` | Path to public key | `certs/public.pem` |
 | `UPLOAD_DIR` | Video storage directory | `./uploads` |
 | `MAX_UPLOAD_SIZE_MB` | Maximum video file size | `500` |
 
@@ -351,7 +369,7 @@ GET /health
 
 ## Security Considerations
 
-- **Authentication**: JWT-based token authentication for protected endpoints
+- **Authentication**: **RS256 Asymmetric JWT**. Tokens are signed by the Authority (Classic Backend) and verified statelessly by microservices (Analysis Backend).
 - **Input Validation**: Pydantic models prevent injection attacks
 - **File Upload Restrictions**: MIME type validation, size limits, virus scanning
 - **CORS Configuration**: Whitelisted origins only
