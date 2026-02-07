@@ -17,3 +17,24 @@ env/
 
 # OS
 .DS_Store
+
+# Media & Uploads (Big Files)
+src/temp_uploads/
+src/static/images/players/
+src/static/images/teams/
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.webm
+
+# AI Models (Large Binary Files)
+*.pt
+*.onnx
+*.engine
+*.weights
+
+# Logs and DB
+*.log
+*.sqlite
+*.db
