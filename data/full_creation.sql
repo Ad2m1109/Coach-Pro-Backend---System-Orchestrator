@@ -13,9 +13,10 @@ CREATE TABLE users (
     email VARCHAR(100) NOT NULL UNIQUE,
     password_hash VARCHAR(255) NOT NULL,
     full_name VARCHAR(100),
+    user_type ENUM('owner', 'staff') DEFAULT 'owner',
+    is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    last_login TIMESTAMP NULL,
-    is_active BOOLEAN DEFAULT TRUE
+    last_login TIMESTAMP NULL
 );
 
 CREATE TABLE teams (
@@ -84,9 +85,14 @@ CREATE TABLE players (
 CREATE TABLE staff (
     id CHAR(36) PRIMARY KEY,
     team_id CHAR(36),
+    user_id CHAR(36) NULL,
     name VARCHAR(50) NOT NULL,
     role ENUM('head_coach', 'assistant_coach', 'physio', 'analyst'),
-    FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE
+    permission_level ENUM('full_access', 'view_only', 'notes_only') DEFAULT 'view_only',
+    email VARCHAR(100) NULL,
+    UNIQUE KEY (user_id),
+    FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
 CREATE TABLE matches (

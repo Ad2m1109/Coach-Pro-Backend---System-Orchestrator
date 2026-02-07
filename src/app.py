@@ -160,21 +160,47 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # Case 3: Success
-    # Get user team/club for claims
-    from services.team_service import TeamService
-    team_service = TeamService(db)
-    user_teams = team_service.get_all_teams(user.id)
-    club_id = user_teams[0].id if user_teams else "no-club"
+    # Case 3: Success - Build token claims based on user type
+    token_data = {
+        "sub": user.email,
+        "user_type": user.user_type,
+    }
+
+    if user.user_type == "owner":
+        # Get user team/club for claims
+        from services.team_service import TeamService
+        team_service = TeamService(db)
+        user_teams = team_service.get_all_teams(user.id)
+        club_id = user_teams[0].id if user_teams else "no-club"
+        
+        token_data.update({
+            "role": "coach",
+            "club_id": club_id,
+            "permissions": ["video_analysis", "tactics_editor"]
+        })
+    
+    elif user.user_type == "staff":
+        # Get staff record for permission level
+        from services.staff_service import StaffService
+        staff_service = StaffService(db)
+        staff = staff_service.get_staff_by_user_id(user.id)
+        
+        if not staff:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Staff record not found",
+            )
+        
+        token_data.update({
+            "staff_id": staff.id,
+            "team_id": staff.team_id,
+            "permission_level": staff.permission_level,
+            "role": staff.role,
+        })
 
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
-        data={
-            "sub": user.email,
-            "role": "coach", # Default role
-            "club_id": club_id,
-            "permissions": ["video_analysis", "tactics_editor"]
-        }, 
+        data=token_data, 
         expires_delta=access_token_expires
     )
     return {"access_token": access_token, "token_type": "bearer"}

@@ -20,8 +20,11 @@ class TeamService:
 
     def get_team(self, team_id: str, user_id: str) -> Optional[Team]:
         with self.db_connection.cursor() as cursor:
-            sql = "SELECT * FROM teams WHERE id = %s AND user_id = %s"
-            cursor.execute(sql, (team_id, user_id))
+            sql = """
+                SELECT t.* FROM teams t 
+                WHERE t.id = %s AND (t.user_id = %s OR EXISTS (SELECT 1 FROM staff s WHERE s.team_id = t.id AND s.user_id = %s))
+            """
+            cursor.execute(sql, (team_id, user_id, user_id))
             team = cursor.fetchone()
             if team:
                 return Team(**team)
@@ -38,8 +41,12 @@ class TeamService:
 
     def get_all_teams(self, user_id: str) -> List[Team]:
         with self.db_connection.cursor() as cursor:
-            sql = "SELECT * FROM teams WHERE user_id = %s"
-            cursor.execute(sql, (user_id,))
+            sql = """
+                SELECT t.* FROM teams t WHERE t.user_id = %s
+                UNION
+                SELECT t.* FROM teams t JOIN staff s ON t.id = s.team_id WHERE s.user_id = %s
+            """
+            cursor.execute(sql, (user_id, user_id))
             teams = cursor.fetchall()
             return [Team(**team) for team in teams]
 
