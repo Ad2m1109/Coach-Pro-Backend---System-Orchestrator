@@ -3,7 +3,7 @@ from typing import List
 from database import get_db, Connection
 from services.staff_service import StaffService
 from models.staff import Staff, StaffCreate, StaffCreateWithAccount
-from app import get_current_active_user # Import the dependency
+from dependencies import get_current_active_user # Import the dependency
 from models.user import User # Import User model
 from services.team_service import TeamService
 

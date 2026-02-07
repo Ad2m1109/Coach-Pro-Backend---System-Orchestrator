@@ -5,7 +5,7 @@ CREATE DATABASE IF NOT EXISTS soccer_analytics;
 USE soccer_analytics;
 
 -- Drop existing objects if they exist (for easy re-execution)
-DROP TABLE IF EXISTS match_team_statistics, match_lineups, player_match_statistics, video_segments, match_events, analysis_reports, staff, players, matches, teams, users, formations, reunions, training_sessions, events;
+DROP TABLE IF EXISTS match_notes, match_team_statistics, match_lineups, player_match_statistics, video_segments, match_events, analysis_reports, staff, players, matches, teams, users, formations, reunions, training_sessions, events;
 
 -- Independent Tables
 CREATE TABLE users (
@@ -210,6 +210,18 @@ CREATE TABLE match_team_statistics (
     FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE
 );
 
+CREATE TABLE match_notes (
+    id CHAR(36) PRIMARY KEY,
+    match_id CHAR(36) NOT NULL,
+    user_id CHAR(36) NOT NULL,
+    content TEXT NOT NULL,
+    note_type ENUM('pre_match', 'live_reaction', 'tactical') DEFAULT 'tactical',
+    video_timestamp FLOAT DEFAULT 0.0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (match_id) REFERENCES matches(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
 -- UUID Triggers (add after all tables exist)
 DELIMITER //
 CREATE TRIGGER before_users_insert BEFORE INSERT ON users FOR EACH ROW
@@ -241,6 +253,8 @@ BEGIN IF NEW.id IS NULL THEN SET NEW.id = UUID(); END IF; END//
 CREATE TRIGGER before_events_insert BEFORE INSERT ON events FOR EACH ROW
 BEGIN IF NEW.id IS NULL THEN SET NEW.id = UUID(); END IF; END//
 CREATE TRIGGER before_match_team_statistics_insert BEFORE INSERT ON match_team_statistics FOR EACH ROW
+BEGIN IF NEW.id IS NULL THEN SET NEW.id = UUID(); END IF; END//
+CREATE TRIGGER before_match_notes_insert BEFORE INSERT ON match_notes FOR EACH ROW
 BEGIN IF NEW.id IS NULL THEN SET NEW.id = UUID(); END IF; END//
 DELIMITER ;
 

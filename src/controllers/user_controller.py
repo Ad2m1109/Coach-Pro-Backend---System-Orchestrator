@@ -3,7 +3,7 @@ from typing import List
 from database import get_db, Connection
 from services.user_service import UserService
 from models.user import User, UserCreate
-from app import get_current_active_user # Import the dependency
+from dependencies import get_current_active_user # Import the dependency
 
 router = APIRouter()
 

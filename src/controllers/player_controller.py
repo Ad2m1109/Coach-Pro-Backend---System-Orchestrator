@@ -4,7 +4,7 @@ from database import get_db, Connection
 from services.player_service import PlayerService
 from services.team_service import TeamService # New import
 from models.player import Player, PlayerCreate
-from app import get_current_active_user # Import the dependency
+from dependencies import get_current_active_user # Import the dependency
 from models.user import User # Import User model
 
 router = APIRouter()

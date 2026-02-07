@@ -3,7 +3,7 @@ from typing import List
 from database import get_db, Connection
 from services.reunion_service import ReunionService
 from models.reunion import Reunion, ReunionCreate
-from app import get_current_active_user # Import the dependency
+from dependencies import get_current_active_user # Import the dependency
 from services.team_service import TeamService # New import
 from models.user import User # Import User model
 

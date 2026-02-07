@@ -3,7 +3,7 @@ from typing import List
 from database import get_db, Connection
 from services.team_service import TeamService
 from models.team import Team, TeamCreate
-from app import get_current_active_user # Import the dependency
+from dependencies import get_current_active_user # Import the dependency
 from models.user import User # Import User model
 
 router = APIRouter()

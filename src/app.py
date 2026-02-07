@@ -18,65 +18,16 @@ import tempfile
 import os
 import uuid
 
-# --- Configuration for JWT (RS256) --- #
-# RSA keys generated via OpenSSL
-# Try to find certs in current dir or parent dir
-if os.path.exists("certs/private.pem"):
-    PRIVATE_KEY_PATH = os.path.join("certs", "private.pem")
-    PUBLIC_KEY_PATH = os.path.join("certs", "public.pem")
-elif os.path.exists("../certs/private.pem"):
-    PRIVATE_KEY_PATH = os.path.join("../certs", "private.pem")
-    PUBLIC_KEY_PATH = os.path.join("../certs", "public.pem")
-else:
-    # Fallback/Debug path
-    PRIVATE_KEY_PATH = "/home/ademyoussfi/Desktop/Projects/football-coach/backend/certs/private.pem"
-    PUBLIC_KEY_PATH = "/home/ademyoussfi/Desktop/Projects/football-coach/backend/certs/public.pem"
-
-with open(PRIVATE_KEY_PATH, "r") as f:
-    RSA_PRIVATE_KEY = f.read()
-
-with open(PUBLIC_KEY_PATH, "r") as f:
-    RSA_PUBLIC_KEY = f.read()
-
-ALGORITHM = "RS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
-
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/token")
-
-def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
-    to_encode = data.copy()
-    if expires_delta:
-        expire = datetime.utcnow() + expires_delta
-    else:
-        expire = datetime.utcnow() + timedelta(minutes=15)
-    to_encode.update({"exp": expire})
-    # jose uses python-jose[cryptography] for RS256 support
-    encoded_jwt = jwt.encode(to_encode, RSA_PRIVATE_KEY, algorithm=ALGORITHM)
-    return encoded_jwt
-
-async def get_current_user(token: str = Depends(oauth2_scheme), db: Connection = Depends(get_db)):
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-    try:
-        payload = jwt.decode(token, RSA_PUBLIC_KEY, algorithms=[ALGORITHM])
-        email: str = payload.get("sub")
-        if email is None:
-            raise credentials_exception
-    except JWTError:
-        raise credentials_exception
-    user_service = UserService(db)
-    user = user_service.get_user_by_email(email=email)
-    if user is None:
-        raise credentials_exception
-    return user
-
-async def get_current_active_user(current_user: User = Depends(get_current_user)):
-    if not current_user.is_active:
-        raise HTTPException(status_code=400, detail="Inactive user")
-    return current_user
+from dependencies import (
+    create_access_token, 
+    get_current_user, 
+    get_current_active_user,
+    RSA_PRIVATE_KEY,
+    RSA_PUBLIC_KEY,
+    ALGORITHM,
+    ACCESS_TOKEN_EXPIRE_MINUTES,
+    oauth2_scheme
+)
 
 # Import controllers
 from controllers.team_controller import router as team_router
@@ -94,6 +45,7 @@ from controllers.reunion_controller import router as reunion_router
 from controllers.training_session_controller import router as training_session_router
 from controllers.event_controller import router as event_router # New import
 from controllers.match_team_statistics_controller import router as match_team_statistics_router # New import
+from controllers.note_controller import router as note_router
 
 app = FastAPI(
     title="Football Match Analysis API",
@@ -128,8 +80,9 @@ app.include_router(match_lineup_router, prefix="/api", tags=["Match Lineups"])
 app.include_router(video_segment_router, prefix="/api", tags=["Video Segments"])
 app.include_router(reunion_router, prefix="/api", tags=["Reunions"])
 app.include_router(training_session_router, prefix="/api", tags=["Training Sessions"])
-app.include_router(event_router, prefix="/api", tags=["Events"]) # New router
-app.include_router(match_team_statistics_router, prefix="/api", tags=["Match Team Statistics"]) # New router
+app.include_router(event_router, prefix="/api", tags=["Events"])
+app.include_router(match_team_statistics_router, prefix="/api", tags=["Match Team Statistics"])
+app.include_router(note_router, prefix="/api", tags=["Notes"])
 
 # Initialize the FootballAnalyzer for single image analysis (can be reused)
 # MOVED to analysis_app.py

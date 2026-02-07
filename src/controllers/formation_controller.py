@@ -3,7 +3,7 @@ from typing import List
 from database import get_db, Connection
 from services.formation_service import FormationService
 from models.formation import Formation, FormationCreate
-from app import get_current_active_user
+from dependencies import get_current_active_user
 from models.user import User
 
 router = APIRouter()

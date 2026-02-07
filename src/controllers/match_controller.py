@@ -5,7 +5,7 @@ from services.match_service import MatchService
 from services.team_service import TeamService # New import
 from models.match import Match, MatchCreate
 from models.match_details import MatchDetails
-from app import get_current_active_user # Import the dependency
+from dependencies import get_current_active_user # Import the dependency
 from models.user import User # Import User model
 
 router = APIRouter()

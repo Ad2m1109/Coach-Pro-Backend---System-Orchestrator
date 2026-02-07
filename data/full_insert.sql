@@ -189,19 +189,40 @@ INSERT INTO match_events (id, match_id, player_id, event_type, minute, video_tim
 (UUID(), @match_id_new, @p_new_11, 'sub_in', 70, 4200.0, NULL),
 (UUID(), @match_id_new, @p_new_3, 'red_card', 85, 5100.0, '0.3,0.8');
 
--- Additional Match Events (ids added)
-INSERT INTO match_events (id, match_id, player_id, event_type, minute, video_timestamp, coordinates) VALUES
-(UUID(), @match_id_new, @p_new_2, 'yellow_card', 25, 1500.0, '0.4,0.6'),
-(UUID(), @match_id_new, @p_new_3, 'red_card', 60, 3600.0, '0.5,0.5'),
-(UUID(), @match_id_new, @p_new_5, 'sub_out', 75, 4500.0, NULL),
-(UUID(), @match_id_new, @p_new_11, 'sub_in', 75, 4500.0, NULL);
+-- Insert Staff Members for the New Team
+SET @staff_id_1 = UUID();
+SET @staff_id_2 = UUID();
+INSERT INTO staff (id, team_id, user_id, name, role, permission_level, email) VALUES
+(@staff_id_1, @team_id_new, NULL, 'Adem Coach', 'head_coach', 'full_access', 'adem@example.com'),
+(@staff_id_2, @team_id_new, NULL, 'John Analyst', 'analyst', 'notes_only', 'john@example.com');
 
--- Additional past match and related inserts follow... (we'll continue adding ids for all remaining INSERTs)
+-- Insert Match Notes for the existing match
+INSERT INTO match_notes (id, match_id, user_id, content, note_type, video_timestamp) VALUES
+(UUID(), @match_id_new, @user_id_new, 'High press from the beginning. Focus on their slow CBs.', 'pre_match', 0.0),
+(UUID(), @match_id_new, @user_id_new, 'Strikers are staying too wide. Need to tuck in more.', 'live_reaction', 320.5),
+(UUID(), @match_id_new, @user_id_new, 'Counter-press success rate is high. Keep exploiting it.', 'tactical', 1250.0),
+(UUID(), @match_id_new, @user_id_new, 'Formation shift to 4-4-2 worked well for stability.', 'tactical', 5400.0);
 
--- To keep this example concise, ensure remaining INSERTS below also include id fields where appropriate (pattern used above):
--- - match_lineups: include id, use UUID()
--- - player_match_statistics: include id, use UUID()
--- - match_team_statistics: include id, use UUID()
--- - match_events: include id, use UUID()
+-- Insert Reunions
+INSERT INTO reunions (id, title, date, location, icon_name) VALUES
+(UUID(), 'Tactical Briefing', '2024-07-30 14:00:00', 'Video Room 1', 'psychology'),
+(UUID(), 'Team Dinner', '2024-08-01 21:00:00', 'The Grand Tavern', 'restaurant'),
+(UUID(), 'Pre-Season Logistics', '2024-07-25 10:00:00', 'Boardroom', 'settings');
 
--- The remainder of the original data should be appended here following the same pattern.
+-- Insert Training Sessions
+INSERT INTO training_sessions (id, title, date, focus, icon_name) VALUES
+(UUID(), 'Defensive Drills', '2024-07-28 09:00:00', 'Zonal Marking', 'shield'),
+(UUID(), 'Precision Shooting', '2024-07-29 11:30:00', 'Finishing', 'sports_soccer'),
+(UUID(), 'Midfield Transition', '2024-07-27 15:00:00', 'Counter-Attack', 'trending_flat');
+
+-- Insert Analysis Reports
+SET @report_id_1 = UUID();
+INSERT INTO analysis_reports (id, match_id, report_type, report_data, generated_by) VALUES
+(@report_id_1, @match_id_new, 'Tactical Post-Match', '{"summary": "Dominant performance with a high line.", "strengths": ["Midfield control", "Finishing"], "weaknesses": ["Defensive transition"]}', @user_id_new);
+
+-- Insert Video Segments
+INSERT INTO video_segments (id, match_id, event_id, analysis_report_id, start_time_sec, end_time_sec, description, video_url) VALUES
+(UUID(), @match_id_new, NULL, @report_id_1, 900.0, 915.0, 'Goal 1 build-up', 'https://video.example.com/match1/goal1.mp4'),
+(UUID(), @match_id_new, NULL, @report_id_1, 3300.0, 3310.0, 'Goal 2 finishing touch', 'https://video.example.com/match1/goal2.mp4');
+
+-- End of full_insert.sql
