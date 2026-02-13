@@ -8,15 +8,10 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 
 from database import get_db, Connection
-from database import get_db, Connection
 from services.user_service import UserService
 from models.user import User, UserCreate
 
-import cv2
-import numpy as np
-import tempfile
 import os
-import uuid
 
 from dependencies import (
     create_access_token, 
@@ -46,6 +41,7 @@ from controllers.training_session_controller import router as training_session_r
 from controllers.event_controller import router as event_router # New import
 from controllers.match_team_statistics_controller import router as match_team_statistics_router # New import
 from controllers.note_controller import router as note_router
+from controllers.analysis_controller import router as analysis_router
 
 app = FastAPI(
     title="Football Match Analysis API",
@@ -83,14 +79,7 @@ app.include_router(training_session_router, prefix="/api", tags=["Training Sessi
 app.include_router(event_router, prefix="/api", tags=["Events"])
 app.include_router(match_team_statistics_router, prefix="/api", tags=["Match Team Statistics"])
 app.include_router(note_router, prefix="/api", tags=["Notes"])
-
-# Initialize the FootballAnalyzer for single image analysis (can be reused)
-# MOVED to analysis_app.py
-
-# In-memory store for analysis status
-# MOVED to analysis_app.py
-
-# Analysis status endpoint moved to analysis_app.py
+app.include_router(analysis_router, prefix="/api", tags=["Analysis"])
 
 @app.post("/api/token", tags=["Authentication"])
 async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Connection = Depends(get_db)):
@@ -178,15 +167,3 @@ async def register_user(user_create: UserCreate, db: Connection = Depends(get_db
 async def read_root():
     return {"message": "Welcome to the Football Match Analysis API"}
 
-# Image detection endpoint moved to analysis_app.py
-
-# Match analysis endpoint moved to analysis_app.py
-
-# --- Authentication Example ---
-# If your frontend uses authentication, add dependencies to endpoints:
-# from fastapi.security import OAuth2PasswordBearer
-# oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
-# @app.get("/secure-endpoint")
-# async def secure_endpoint(token: str = Depends(oauth2_scheme)):
-#     # ...authentication logic...
-#     pass

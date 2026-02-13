@@ -1,5 +1,6 @@
 fastapi
 uvicorn
+python-multipart
 opencv-python
 numpy
 ultralytics
@@ -7,6 +8,7 @@ PyMySQL
 pydantic
 email-validator
 passlib[bcrypt]
+bcrypt==4.0.1
 python-jose[cryptography]
 grpcio
 grpcio-tools

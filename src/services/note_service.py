@@ -31,9 +31,19 @@ class NoteService:
             # Join with users and staff to get names and roles
             # If user is owner, role is 'Owner'
             # If user is staff, get role from staff table
+            # Also handle legacy 'proposition' notes by treating them as 'tactical'
             sql = """
                 SELECT 
-                    n.*,
+                    n.id,
+                    n.match_id,
+                    n.user_id,
+                    n.content,
+                    CASE 
+                        WHEN n.note_type = 'proposition' THEN 'tactical'
+                        ELSE n.note_type
+                    END as note_type,
+                    n.video_timestamp,
+                    n.created_at,
                     COALESCE(s.name, u.full_name) as author_name,
                     CASE 
                         WHEN u.user_type = 'owner' THEN 'Owner'

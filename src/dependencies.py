@@ -10,15 +10,13 @@ from services.user_service import UserService
 from models.user import User
 
 # --- Configuration for JWT (RS256) --- #
-if os.path.exists("certs/private.pem"):
-    PRIVATE_KEY_PATH = os.path.join("certs", "private.pem")
-    PUBLIC_KEY_PATH = os.path.join("certs", "public.pem")
-elif os.path.exists("../certs/private.pem"):
-    PRIVATE_KEY_PATH = os.path.join("../certs", "private.pem")
-    PUBLIC_KEY_PATH = os.path.join("../certs", "public.pem")
-else:
-    PRIVATE_KEY_PATH = "/home/ademyoussfi/Desktop/Projects/football-coach/backend/certs/private.pem"
-    PUBLIC_KEY_PATH = "/home/ademyoussfi/Desktop/Projects/football-coach/backend/certs/public.pem"
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PRIVATE_KEY_PATH = os.path.join(PROJECT_ROOT, "certs", "private.pem")
+PUBLIC_KEY_PATH = os.path.join(PROJECT_ROOT, "certs", "public.pem")
+if not os.path.exists(PRIVATE_KEY_PATH):
+    # Fallback for local dev if PROJECT_ROOT logic fails in some shell envs
+    PRIVATE_KEY_PATH = "certs/private.pem"
+    PUBLIC_KEY_PATH = "certs/public.pem"
 
 with open(PRIVATE_KEY_PATH, "r") as f:
     RSA_PRIVATE_KEY = f.read()
