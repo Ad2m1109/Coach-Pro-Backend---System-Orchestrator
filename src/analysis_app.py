@@ -12,6 +12,9 @@ from datetime import datetime
 import json
 from pathlib import Path
 from fastapi.responses import FileResponse, JSONResponse
+from fastapi import Request
+from fastapi.responses import StreamingResponse, Response
+import subprocess
 
 from database import get_db, Connection
 from services.user_service import UserService
@@ -55,6 +58,29 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Connection =
         raise credentials_exception
     return user
 
+
+async def get_current_user_from_query_token(
+    access_token: str,
+    db: Connection,
+):
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+    )
+    try:
+        payload = jwt.decode(access_token, RSA_PUBLIC_KEY, algorithms=[ALGORITHM])
+        email: str = payload.get("sub")
+        if email is None:
+            raise credentials_exception
+    except JWTError:
+        raise credentials_exception
+
+    user_service = UserService(db)
+    user = user_service.get_user_by_email(email=email)
+    if user is None:
+        raise credentials_exception
+    return user
+
 async def get_current_active_user(current_user: User = Depends(get_current_user)):
     return current_user
 
@@ -74,6 +100,7 @@ app.add_middleware(
 
 # Initialize the FootballAnalyzer
 single_image_analyzer = FootballAnalyzer()
+CHUNK_SIZE = 1024 * 1024
 
 
 def _create_demo_run(
@@ -183,11 +210,36 @@ async def run_demo_analysis_job(
 
         outputs = result.get("result", {})
         heatmap_image = DEMO_ROOT / "outputs" / "heatmaps" / "heatmap.png"
+        all_players_grid = DEMO_ROOT / "outputs" / "heatmaps" / "all_players_grid.png"
         movement_trail = DEMO_ROOT / "outputs" / "analytics" / "movement_trail.png"
+        possession_chart = DEMO_ROOT / "outputs" / "analytics" / "possession_analysis.png"
         if heatmap_image.exists():
             outputs["heatmap_image_path"] = "outputs/heatmaps/heatmap.png"
+        if all_players_grid.exists():
+            outputs["all_players_grid_image_path"] = "outputs/heatmaps/all_players_grid.png"
         if movement_trail.exists():
             outputs["movement_trail_image_path"] = "outputs/analytics/movement_trail.png"
+        if possession_chart.exists():
+            outputs["possession_chart_image_path"] = "outputs/analytics/possession_analysis.png"
+
+        # Optimize MP4 outputs for streaming and generate preview videos when possible.
+        video_output_keys = [
+            "tracking_video_path",
+            "heatmap_video_path",
+            "backline_video_path",
+            "animation_video_path",
+        ]
+        for key in video_output_keys:
+            relative_path = outputs.get(key)
+            if not relative_path:
+                continue
+            abs_path = (DEMO_ROOT / relative_path).resolve()
+            if not abs_path.exists():
+                continue
+            _optimize_mp4_faststart(abs_path)
+            preview_relative = _create_preview_video(abs_path)
+            if preview_relative:
+                outputs[f"{key.replace('_path', '')}_preview_path"] = preview_relative
 
         _update_demo_run(
             job_id,
@@ -322,14 +374,156 @@ def _resolve_output_path(path: str) -> Path:
     return candidate
 
 
+def _optimize_mp4_faststart(file_path: Path) -> None:
+    """Move MP4 metadata to the beginning for faster startup."""
+    if file_path.suffix.lower() != ".mp4":
+        return
+    temp_path = file_path.with_name(f"{file_path.stem}.faststart{file_path.suffix}")
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-i",
+        str(file_path),
+        "-c",
+        "copy",
+        "-movflags",
+        "+faststart",
+        str(temp_path),
+    ]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+        if result.returncode == 0 and temp_path.exists():
+            temp_path.replace(file_path)
+    except Exception:
+        # Keep original file if ffmpeg is missing or processing fails.
+        if temp_path.exists():
+            try:
+                temp_path.unlink()
+            except Exception:
+                pass
+
+
+def _create_preview_video(file_path: Path) -> Optional[str]:
+    """Create low-resolution preview video for faster mobile playback."""
+    if file_path.suffix.lower() != ".mp4":
+        return None
+    previews_dir = DEMO_ROOT / "outputs" / "previews"
+    previews_dir.mkdir(parents=True, exist_ok=True)
+    preview_name = f"{file_path.stem}_preview.mp4"
+    preview_path = previews_dir / preview_name
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-i",
+        str(file_path),
+        "-vf",
+        "scale=-2:480",
+        "-preset",
+        "veryfast",
+        "-movflags",
+        "+faststart",
+        "-an",
+        str(preview_path),
+    ]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        if result.returncode == 0 and preview_path.exists():
+            return f"outputs/previews/{preview_name}"
+    except Exception:
+        pass
+    return None
+
+
+def _stream_file_range(file_path: Path, start: int, end: int):
+    with file_path.open("rb") as f:
+        f.seek(start)
+        bytes_remaining = end - start + 1
+        while bytes_remaining > 0:
+            read_size = min(CHUNK_SIZE, bytes_remaining)
+            chunk = f.read(read_size)
+            if not chunk:
+                break
+            bytes_remaining -= len(chunk)
+            yield chunk
+
+
 @app.get("/api/analysis/files", tags=["Analysis"])
-async def get_analysis_file(path: str, current_user: User = Depends(get_current_user)):
+async def get_analysis_file(
+    path: str,
+    access_token: str = "",
+    db: Connection = Depends(get_db),
+    current_user: Optional[User] = None,
+):
+    if not access_token:
+        raise HTTPException(status_code=401, detail="Missing token")
+    current_user = await get_current_user_from_query_token(access_token, db)
     file_path = _resolve_output_path(path)
     return FileResponse(file_path)
 
 
+@app.get("/api/analysis/stream", tags=["Analysis"])
+async def stream_analysis_file(
+    request: Request,
+    path: str,
+    access_token: str = "",
+    db: Connection = Depends(get_db),
+    current_user: Optional[User] = None,
+):
+    """Range-enabled streaming endpoint for video playback."""
+    if not access_token:
+        raise HTTPException(status_code=401, detail="Missing token")
+    current_user = await get_current_user_from_query_token(access_token, db)
+    file_path = _resolve_output_path(path)
+    file_size = file_path.stat().st_size
+    range_header = request.headers.get("range")
+    content_type = "video/mp4" if file_path.suffix.lower() == ".mp4" else "application/octet-stream"
+
+    if not range_header:
+        headers = {
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(file_size),
+        }
+        return StreamingResponse(
+            _stream_file_range(file_path, 0, file_size - 1),
+            status_code=200,
+            media_type=content_type,
+            headers=headers,
+        )
+
+    try:
+        range_value = range_header.strip().lower().replace("bytes=", "")
+        start_str, end_str = range_value.split("-", 1)
+        start = int(start_str) if start_str else 0
+        end = int(end_str) if end_str else file_size - 1
+    except Exception:
+        return Response(status_code=416)
+
+    if start >= file_size or end >= file_size or start > end:
+        return Response(status_code=416)
+
+    headers = {
+        "Content-Range": f"bytes {start}-{end}/{file_size}",
+        "Accept-Ranges": "bytes",
+        "Content-Length": str(end - start + 1),
+    }
+    return StreamingResponse(
+        _stream_file_range(file_path, start, end),
+        status_code=206,
+        media_type=content_type,
+        headers=headers,
+    )
+
+
 @app.get("/api/analysis/files/json", tags=["Analysis"])
-async def get_analysis_json(path: str, current_user: User = Depends(get_current_user)):
+async def get_analysis_json(
+    path: str,
+    access_token: str = "",
+    db: Connection = Depends(get_db),
+    current_user: Optional[User] = None,
+):
+    if not access_token:
+        raise HTTPException(status_code=401, detail="Missing token")
+    current_user = await get_current_user_from_query_token(access_token, db)
     file_path = _resolve_output_path(path)
     if file_path.suffix.lower() != ".json":
         raise HTTPException(status_code=400, detail="Only JSON files are supported")
