@@ -2,7 +2,7 @@ from fastapi import FastAPI, Depends, File, UploadFile, HTTPException, status, B
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
-from typing import Optional, Dict, Any
+from typing import Optional, Dict
 import os
 import uuid
 import cv2
@@ -26,7 +26,17 @@ from services.tracking_engine_client import TrackingEngineClient
 import os
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DEMO_ROOT = Path(PROJECT_ROOT).parent / "demo"
+DEFAULT_INTERNAL_PIPELINE_ROOT = Path(PROJECT_ROOT).parent / "tracking_engine" / "pipeline"
+LEGACY_INTERNAL_DEMO_ROOT = Path(PROJECT_ROOT).parent / "tracking_engine" / "demo"
+LEGACY_EXTERNAL_DEMO_ROOT = Path(PROJECT_ROOT).parent / "demo"
+ANALYSIS_OUTPUT_ROOT = Path(
+    os.getenv("ANALYSIS_OUTPUT_ROOT", str(DEFAULT_INTERNAL_PIPELINE_ROOT))
+).resolve()
+if not ANALYSIS_OUTPUT_ROOT.exists():
+    if LEGACY_INTERNAL_DEMO_ROOT.exists():
+        ANALYSIS_OUTPUT_ROOT = LEGACY_INTERNAL_DEMO_ROOT.resolve()
+    elif LEGACY_EXTERNAL_DEMO_ROOT.exists():
+        ANALYSIS_OUTPUT_ROOT = LEGACY_EXTERNAL_DEMO_ROOT.resolve()
 PUBLIC_KEY_PATH = os.path.join(PROJECT_ROOT, "certs", "public.pem")
 if not os.path.exists(PUBLIC_KEY_PATH):
     PUBLIC_KEY_PATH = "certs/public.pem" # local fallback
@@ -103,7 +113,7 @@ single_image_analyzer = FootballAnalyzer()
 CHUNK_SIZE = 1024 * 1024
 
 
-def _create_demo_run(
+def _create_analysis_run(
     run_id: str,
     match_id: str,
     input_video_name: str,
@@ -115,17 +125,16 @@ def _create_demo_run(
         with db.cursor() as cursor:
             cursor.execute(
                 """
-                INSERT INTO demo_analysis_runs
-                    (id, match_id, input_video_name, status, progress, message, outputs, generated_by)
+                INSERT INTO analysis_runs
+                    (id, match_id, input_video_name, status, progress, message, generated_by)
                 VALUES
-                    (%s, %s, %s, 'PENDING', 0.0, %s, %s, %s)
+                    (%s, %s, %s, 'PENDING', 0.0, %s, %s)
                 """,
                 (
                     run_id,
                     match_id,
                     input_video_name,
-                    "Upload complete. Queued for demo analysis.",
-                    json.dumps({}),
+                    "Upload complete. Queued for tracking analysis.",
                     generated_by,
                 ),
             )
@@ -137,12 +146,11 @@ def _create_demo_run(
             pass
 
 
-def _update_demo_run(
+def _update_analysis_run(
     run_id: str,
     status: str,
     progress: float,
     message: str,
-    outputs: Optional[Dict[str, Any]] = None,
     completed: bool = False,
 ):
     db_gen = get_db()
@@ -152,20 +160,19 @@ def _update_demo_run(
             if completed:
                 cursor.execute(
                     """
-                    UPDATE demo_analysis_runs
+                    UPDATE analysis_runs
                     SET status = %s,
                         progress = %s,
                         message = %s,
-                        outputs = %s,
                         completed_at = NOW()
                     WHERE id = %s
                     """,
-                    (status, progress, message, json.dumps(outputs or {}), run_id),
+                    (status, progress, message, run_id),
                 )
             else:
                 cursor.execute(
                     """
-                    UPDATE demo_analysis_runs
+                    UPDATE analysis_runs
                     SET status = %s,
                         progress = %s,
                         message = %s
@@ -180,20 +187,20 @@ def _update_demo_run(
         except StopIteration:
             pass
 
-async def run_demo_analysis_job(
+async def run_tracking_analysis_job(
     job_id: str,
     video_path: str,
     match_id: str,
     frame_limit: int,
     skip_json: bool,
 ):
-    """Run demo pipeline through Tracking Engine and persist status in DB."""
+    """Run tracking pipeline through Tracking Engine and persist status in DB."""
     client = TrackingEngineClient()
     try:
-        _update_demo_run(job_id, "PROCESSING", 0.05, "Submitting video to tracking engine...")
+        _update_analysis_run(job_id, "PROCESSING", 0.05, "Submitting video to tracking engine...")
 
         async def progress_callback(response):
-            _update_demo_run(
+            _update_analysis_run(
                 job_id,
                 response.status,
                 float(response.progress),
@@ -202,25 +209,13 @@ async def run_demo_analysis_job(
 
         result = await client.analyze_video(
             video_path=video_path,
-            match_id=match_id,
+            match_id=job_id,
             frame_limit=frame_limit,
             skip_json=skip_json,
             progress_callback=progress_callback,
         )
 
         outputs = result.get("result", {})
-        heatmap_image = DEMO_ROOT / "outputs" / "heatmaps" / "heatmap.png"
-        all_players_grid = DEMO_ROOT / "outputs" / "heatmaps" / "all_players_grid.png"
-        movement_trail = DEMO_ROOT / "outputs" / "analytics" / "movement_trail.png"
-        possession_chart = DEMO_ROOT / "outputs" / "analytics" / "possession_analysis.png"
-        if heatmap_image.exists():
-            outputs["heatmap_image_path"] = "outputs/heatmaps/heatmap.png"
-        if all_players_grid.exists():
-            outputs["all_players_grid_image_path"] = "outputs/heatmaps/all_players_grid.png"
-        if movement_trail.exists():
-            outputs["movement_trail_image_path"] = "outputs/analytics/movement_trail.png"
-        if possession_chart.exists():
-            outputs["possession_chart_image_path"] = "outputs/analytics/possession_analysis.png"
 
         # Optimize MP4 outputs for streaming and generate preview videos when possible.
         video_output_keys = [
@@ -233,7 +228,7 @@ async def run_demo_analysis_job(
             relative_path = outputs.get(key)
             if not relative_path:
                 continue
-            abs_path = (DEMO_ROOT / relative_path).resolve()
+            abs_path = (ANALYSIS_OUTPUT_ROOT / relative_path).resolve()
             if not abs_path.exists():
                 continue
             _optimize_mp4_faststart(abs_path)
@@ -241,21 +236,19 @@ async def run_demo_analysis_job(
             if preview_relative:
                 outputs[f"{key.replace('_path', '')}_preview_path"] = preview_relative
 
-        _update_demo_run(
+        _update_analysis_run(
             job_id,
             result.get("status", "COMPLETED"),
             float(result.get("progress", 1.0)),
             result.get("message", "Analysis complete"),
-            outputs=outputs,
             completed=True,
         )
     except Exception as e:
-        _update_demo_run(
+        _update_analysis_run(
             job_id,
             "FAILED",
             0.0,
             str(e),
-            outputs={},
             completed=True,
         )
     finally:
@@ -276,8 +269,8 @@ async def get_analysis_status(analysis_id: str, db: Connection = Depends(get_db)
     with db.cursor() as cursor:
         cursor.execute(
             """
-            SELECT id, match_id, input_video_name, status, progress, message, outputs, submitted_at, completed_at
-            FROM demo_analysis_runs
+            SELECT id, match_id, input_video_name, status, progress, message, submitted_at, completed_at
+            FROM analysis_runs
             WHERE id = %s AND generated_by = %s
             LIMIT 1
             """,
@@ -288,10 +281,6 @@ async def get_analysis_status(analysis_id: str, db: Connection = Depends(get_db)
     if not row:
         raise HTTPException(status_code=404, detail="Analysis task not found")
 
-    outputs = row.get("outputs")
-    if isinstance(outputs, str):
-        outputs = json.loads(outputs)
-
     return {
         "analysis_id": row["id"],
         "match_id": row.get("match_id"),
@@ -299,7 +288,7 @@ async def get_analysis_status(analysis_id: str, db: Connection = Depends(get_db)
         "status": row.get("status"),
         "progress": float(row.get("progress") or 0.0),
         "message": row.get("message") or "",
-        "outputs": outputs or {},
+        "outputs": _build_outputs_for_run(row["id"]),
         "submitted_at": row["submitted_at"].isoformat() if row.get("submitted_at") else None,
         "completed_at": row["completed_at"].isoformat() if row.get("completed_at") else None,
     }
@@ -307,12 +296,12 @@ async def get_analysis_status(analysis_id: str, db: Connection = Depends(get_db)
 
 @app.get("/api/analysis_history", tags=["Analysis"])
 async def get_analysis_history(db: Connection = Depends(get_db), current_user: User = Depends(get_current_user)):
-    """Return demo analysis history for Analyze > History page."""
+    """Return tracking analysis history for Analyze > History page."""
     with db.cursor() as cursor:
         cursor.execute(
             """
-            SELECT id, match_id, input_video_name, status, progress, message, outputs, submitted_at, completed_at
-            FROM demo_analysis_runs
+            SELECT id, match_id, input_video_name, status, progress, message, submitted_at, completed_at
+            FROM analysis_runs
             WHERE generated_by = %s
             ORDER BY submitted_at DESC
             """,
@@ -322,9 +311,6 @@ async def get_analysis_history(db: Connection = Depends(get_db), current_user: U
 
     history = []
     for row in rows:
-        outputs = row.get("outputs")
-        if isinstance(outputs, str):
-            outputs = json.loads(outputs)
         history.append(
             {
                 "analysis_id": row["id"],
@@ -333,7 +319,7 @@ async def get_analysis_history(db: Connection = Depends(get_db), current_user: U
                 "status": row.get("status"),
                 "progress": float(row.get("progress") or 0.0),
                 "message": row.get("message") or "",
-                "outputs": outputs or {},
+                "outputs": _build_outputs_for_run(row["id"]),
                 "submitted_at": row["submitted_at"].isoformat() if row.get("submitted_at") else None,
                 "completed_at": row["completed_at"].isoformat() if row.get("completed_at") else None,
             }
@@ -350,7 +336,7 @@ async def delete_analysis_history_item(
     with db.cursor() as cursor:
         cursor.execute(
             """
-            DELETE FROM demo_analysis_runs
+            DELETE FROM analysis_runs
             WHERE id = %s AND generated_by = %s
             """,
             (analysis_id, current_user.id),
@@ -365,13 +351,51 @@ async def delete_analysis_history_item(
 
 def _resolve_output_path(path: str) -> Path:
     relative = Path(path)
-    candidate = (DEMO_ROOT / relative).resolve()
-    demo_root_resolved = DEMO_ROOT.resolve()
-    if not str(candidate).startswith(str(demo_root_resolved)):
+    candidate = (ANALYSIS_OUTPUT_ROOT / relative).resolve()
+    output_root_resolved = ANALYSIS_OUTPUT_ROOT.resolve()
+    if not str(candidate).startswith(str(output_root_resolved)):
         raise HTTPException(status_code=400, detail="Invalid path")
     if not candidate.exists() or not candidate.is_file():
         raise HTTPException(status_code=404, detail="File not found")
     return candidate
+
+
+def _build_outputs_for_run(run_id: str) -> Dict[str, str]:
+    """Build output file paths dynamically from run id (no DB path storage)."""
+    candidates = {
+        "tracking_video_path": f"outputs/{run_id}tracking.mp4",
+        "tracking_json_path": f"outputs/{run_id}tracking.json",
+        "backline_video_path": f"outputs/analytics/{run_id}backline.mp4",
+        "heatmap_video_path": f"outputs/heatmaps/{run_id}heatmap.mp4",
+        "possession_analysis_path": f"outputs/analytics/{run_id}possession.json",
+        "animation_video_path": f"outputs/analytics/{run_id}animation.mp4",
+        "heatmap_image_path": f"outputs/heatmaps/{run_id}heatmap.png",
+        "all_players_grid_image_path": f"outputs/heatmaps/{run_id}all_players_grid.png",
+        "movement_trail_image_path": f"outputs/analytics/{run_id}movement_trail.png",
+        "possession_chart_image_path": f"outputs/analytics/{run_id}possession_analysis.png",
+    }
+
+    outputs: Dict[str, str] = {}
+    for key, rel_path in candidates.items():
+        abs_path = ANALYSIS_OUTPUT_ROOT / rel_path
+        if abs_path.exists() and abs_path.is_file():
+            outputs[key] = rel_path
+
+    for key in [
+        "tracking_video_path",
+        "heatmap_video_path",
+        "backline_video_path",
+        "animation_video_path",
+    ]:
+        rel_path = outputs.get(key)
+        if not rel_path:
+            continue
+        preview_rel = f"outputs/previews/{Path(rel_path).stem}_preview.mp4"
+        preview_abs = ANALYSIS_OUTPUT_ROOT / preview_rel
+        if preview_abs.exists() and preview_abs.is_file():
+            outputs[f"{key.replace('_path', '')}_preview_path"] = preview_rel
+
+    return outputs
 
 
 def _optimize_mp4_faststart(file_path: Path) -> None:
@@ -407,7 +431,7 @@ def _create_preview_video(file_path: Path) -> Optional[str]:
     """Create low-resolution preview video for faster mobile playback."""
     if file_path.suffix.lower() != ".mp4":
         return None
-    previews_dir = DEMO_ROOT / "outputs" / "previews"
+    previews_dir = ANALYSIS_OUTPUT_ROOT / "outputs" / "previews"
     previews_dir.mkdir(parents=True, exist_ok=True)
     preview_name = f"{file_path.stem}_preview.mp4"
     preview_path = previews_dir / preview_name
@@ -561,7 +585,7 @@ async def analyze_match_video(
     current_user: User = Depends(get_current_user),
 ):
     """
-    Analyze uploaded video through tracking_engine demo pipeline.
+    Analyze uploaded video through tracking_engine pipeline.
     Does NOT auto-create a match in history.
     """
     try:
@@ -574,7 +598,7 @@ async def analyze_match_video(
         file_path = os.path.abspath(os.path.join(upload_dir, f"{analysis_id}_{safe_name}"))
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
-        _create_demo_run(
+        _create_analysis_run(
             run_id=analysis_id,
             match_id=effective_match_id,
             input_video_name=safe_name,
@@ -582,7 +606,7 @@ async def analyze_match_video(
         )
 
         background_tasks.add_task(
-            run_demo_analysis_job,
+            run_tracking_analysis_job,
             analysis_id,
             file_path,
             effective_match_id,
@@ -592,7 +616,7 @@ async def analyze_match_video(
 
         return {
             "status": "accepted",
-            "message": "Upload complete. Demo analysis started.",
+            "message": "Upload complete. Tracking analysis started.",
             "match_id": effective_match_id,
             "analysis_id": analysis_id,
         }

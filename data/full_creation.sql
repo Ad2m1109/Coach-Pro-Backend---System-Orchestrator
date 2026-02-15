@@ -5,7 +5,7 @@ CREATE DATABASE IF NOT EXISTS soccer_analytics;
 USE soccer_analytics;
 
 -- Drop existing objects if they exist (for easy re-execution)
-DROP TABLE IF EXISTS demo_analysis_runs, match_notes, match_team_statistics, match_lineups, player_match_statistics, video_segments, match_events, analysis_reports, staff, players, matches, teams, users, formations, reunions, training_sessions, events;
+DROP TABLE IF EXISTS analysis_runs, match_notes, match_team_statistics, match_lineups, player_match_statistics, video_segments, match_events, analysis_reports, staff, players, matches, teams, users, formations, reunions, training_sessions, events;
 
 -- Independent Tables
 CREATE TABLE users (
@@ -163,14 +163,13 @@ CREATE TABLE analysis_reports (
     FOREIGN KEY (generated_by) REFERENCES users(id)
 );
 
-CREATE TABLE demo_analysis_runs (
+CREATE TABLE analysis_runs (
     id CHAR(36) PRIMARY KEY,
     match_id CHAR(36) NULL,
     input_video_name VARCHAR(255),
     status ENUM('PENDING', 'PROCESSING', 'COMPLETED', 'FAILED') DEFAULT 'PENDING',
     progress DECIMAL(5,4) DEFAULT 0.0,
     message TEXT,
-    outputs JSON,
     submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     completed_at TIMESTAMP NULL,
     generated_by CHAR(36) NULL,
@@ -254,7 +253,7 @@ CREATE TRIGGER before_player_match_statistics_insert BEFORE INSERT ON player_mat
 BEGIN IF NEW.id IS NULL THEN SET NEW.id = UUID(); END IF; END//
 CREATE TRIGGER before_analysis_reports_insert BEFORE INSERT ON analysis_reports FOR EACH ROW
 BEGIN IF NEW.id IS NULL THEN SET NEW.id = UUID(); END IF; END//
-CREATE TRIGGER before_demo_analysis_runs_insert BEFORE INSERT ON demo_analysis_runs FOR EACH ROW
+CREATE TRIGGER before_analysis_runs_insert BEFORE INSERT ON analysis_runs FOR EACH ROW
 BEGIN IF NEW.id IS NULL THEN SET NEW.id = UUID(); END IF; END//
 CREATE TRIGGER before_video_segments_insert BEFORE INSERT ON video_segments FOR EACH ROW
 BEGIN IF NEW.id IS NULL THEN SET NEW.id = UUID(); END IF; END//
