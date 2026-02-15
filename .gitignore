@@ -19,7 +19,10 @@ env/
 .DS_Store
 
 # Media & Uploads (Big Files)
+temp_uploads/
+uploads/
 src/temp_uploads/
+src/uploads/
 src/static/images/players/
 src/static/images/teams/
 *.mp4
