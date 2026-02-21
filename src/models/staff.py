@@ -7,6 +7,7 @@ class StaffRoleEnum(str, Enum):
     assistant_coach = "assistant_coach"
     physio = "physio"
     analyst = "analyst"
+    player = "player"
 
 class PermissionLevelEnum(str, Enum):
     full_access = "full_access"

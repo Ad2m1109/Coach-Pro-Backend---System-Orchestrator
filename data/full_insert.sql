@@ -6,10 +6,22 @@ USE soccer_analytics;
 -- Define UUIDs for the new user and their team
 SET @user_id_new = UUID();
 SET @team_id_new = UUID();
+SET @default_password_hash = '$2b$12$mzKhvh02ijxfifha60gAXexnZzQvhO3.mFC3nT7sE4uiarEf5yj2K';
 
--- Insert New User
-INSERT INTO users (id, email, password_hash, full_name, is_active) VALUES
-(@user_id_new, 'newuser@example.com', '$2b$12$mzKhvh02ijxfifha60gAXexnZzQvhO3.mFC3nT7sE4uiarEf5yj2K', 'New User', TRUE);
+-- Insert primary account manager (owner)
+INSERT INTO users (id, email, password_hash, full_name, user_type, app_role, is_active) VALUES
+(@user_id_new, 'newuser@example.com', @default_password_hash, 'New User', 'owner', 'account_manager', TRUE);
+
+-- Insert staff user accounts for RBAC testing
+SET @coach_user_id = UUID();
+SET @assistant_user_id = UUID();
+SET @analyst_user_id = UUID();
+SET @player_user_id = UUID();
+INSERT INTO users (id, email, password_hash, full_name, user_type, app_role, is_active) VALUES
+(@coach_user_id, 'coach@example.com', @default_password_hash, 'Adem Coach', 'staff', 'coach', TRUE),
+(@assistant_user_id, 'assistant@example.com', @default_password_hash, 'Moez Assistant', 'staff', 'assistant_coach', TRUE),
+(@analyst_user_id, 'analyst@example.com', @default_password_hash, 'John Analyst', 'staff', 'analyst', TRUE),
+(@player_user_id, 'player@example.com', @default_password_hash, 'Ali Player', 'staff', 'player', TRUE);
 
 -- Insert New Team linked to the New User
 INSERT INTO teams (id, name, user_id, primary_color, secondary_color, logo_url) VALUES
@@ -192,9 +204,13 @@ INSERT INTO match_events (id, match_id, player_id, event_type, minute, video_tim
 -- Insert Staff Members for the New Team
 SET @staff_id_1 = UUID();
 SET @staff_id_2 = UUID();
+SET @staff_id_3 = UUID();
+SET @staff_id_4 = UUID();
 INSERT INTO staff (id, team_id, user_id, name, role, permission_level, email) VALUES
-(@staff_id_1, @team_id_new, NULL, 'Adem Coach', 'head_coach', 'full_access', 'adem@example.com'),
-(@staff_id_2, @team_id_new, NULL, 'John Analyst', 'analyst', 'notes_only', 'john@example.com');
+(@staff_id_1, @team_id_new, @coach_user_id, 'Adem Coach', 'head_coach', 'full_access', 'coach@example.com'),
+(@staff_id_2, @team_id_new, @assistant_user_id, 'Moez Assistant', 'assistant_coach', 'full_access', 'assistant@example.com'),
+(@staff_id_3, @team_id_new, @analyst_user_id, 'John Analyst', 'analyst', 'notes_only', 'analyst@example.com'),
+(@staff_id_4, @team_id_new, @player_user_id, 'Ali Player', 'player', 'view_only', 'player@example.com');
 
 -- Insert Match Notes for the existing match
 INSERT INTO match_notes (id, match_id, user_id, content, note_type, video_timestamp) VALUES

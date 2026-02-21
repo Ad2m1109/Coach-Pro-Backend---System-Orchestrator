@@ -49,6 +49,12 @@ class UserService:
             users = cursor.fetchall()
             return [User(**user) for user in users]
 
+    def count_users(self) -> int:
+        with self.db_connection.cursor() as cursor:
+            cursor.execute("SELECT COUNT(*) AS total FROM users")
+            row = cursor.fetchone()
+            return int(row["total"]) if row and "total" in row else 0
+
     def update_user(self, user_id: str, user_update: UserCreate) -> Optional[User]:
         hashed_password = self.get_password_hash(user_update.password) if user_update.password else None
         with self.db_connection.cursor() as cursor:

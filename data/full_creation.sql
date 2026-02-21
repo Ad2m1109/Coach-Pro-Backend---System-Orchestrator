@@ -14,6 +14,7 @@ CREATE TABLE users (
     password_hash VARCHAR(255) NOT NULL,
     full_name VARCHAR(100),
     user_type ENUM('owner', 'staff') DEFAULT 'owner',
+    app_role ENUM('account_manager', 'coach', 'assistant_coach', 'analyst', 'player') NULL,
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     last_login TIMESTAMP NULL
@@ -87,7 +88,7 @@ CREATE TABLE staff (
     team_id CHAR(36),
     user_id CHAR(36) NULL,
     name VARCHAR(50) NOT NULL,
-    role ENUM('head_coach', 'assistant_coach', 'physio', 'analyst'),
+    role ENUM('head_coach', 'assistant_coach', 'physio', 'analyst', 'player'),
     permission_level ENUM('full_access', 'view_only', 'notes_only') DEFAULT 'view_only',
     email VARCHAR(100) NULL,
     UNIQUE KEY (user_id),
@@ -238,7 +239,26 @@ CREATE TABLE match_notes (
 -- UUID Triggers (add after all tables exist)
 DELIMITER //
 CREATE TRIGGER before_users_insert BEFORE INSERT ON users FOR EACH ROW
-BEGIN IF NEW.id IS NULL THEN SET NEW.id = UUID(); END IF; END//
+BEGIN
+    IF NEW.id IS NULL THEN SET NEW.id = UUID(); END IF;
+    IF NEW.app_role IS NULL THEN
+        IF NEW.user_type = 'owner' THEN
+            SET NEW.app_role = 'account_manager';
+        ELSE
+            SET NEW.app_role = 'player';
+        END IF;
+    END IF;
+END//
+CREATE TRIGGER before_users_update BEFORE UPDATE ON users FOR EACH ROW
+BEGIN
+    IF NEW.app_role IS NULL THEN
+        IF NEW.user_type = 'owner' THEN
+            SET NEW.app_role = 'account_manager';
+        ELSE
+            SET NEW.app_role = 'player';
+        END IF;
+    END IF;
+END//
 CREATE TRIGGER before_teams_insert BEFORE INSERT ON teams FOR EACH ROW
 BEGIN IF NEW.id IS NULL THEN SET NEW.id = UUID(); END IF; END//
 CREATE TRIGGER before_players_insert BEFORE INSERT ON players FOR EACH ROW
@@ -272,5 +292,8 @@ BEGIN IF NEW.id IS NULL THEN SET NEW.id = UUID(); END IF; END//
 CREATE TRIGGER before_match_notes_insert BEFORE INSERT ON match_notes FOR EACH ROW
 BEGIN IF NEW.id IS NULL THEN SET NEW.id = UUID(); END IF; END//
 DELIMITER ;
+
+-- Optional performance index for role-based filtering
+CREATE INDEX idx_users_app_role ON users(app_role);
 
 -- End of schema & triggers

@@ -3,7 +3,7 @@ from typing import List
 from database import get_db, Connection
 from services.staff_service import StaffService
 from models.staff import Staff, StaffCreate, StaffCreateWithAccount
-from dependencies import get_current_active_user # Import the dependency
+from dependencies import get_current_active_user, require_account_manager
 from models.user import User # Import User model
 from services.team_service import TeamService
 
@@ -13,13 +13,9 @@ router = APIRouter()
 def create_staff_with_account(
     staff_data: StaffCreateWithAccount, 
     db: Connection = Depends(get_db), 
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(require_account_manager)
 ):
     """Create a staff member with a new user account (owner only)"""
-    # Only owners can create staff accounts
-    if current_user.user_type != "owner":
-        raise HTTPException(status_code=403, detail="Only team owners can create staff accounts")
-    
     # Get user's teams
     team_service = TeamService(db)
     user_teams = team_service.get_all_teams(current_user.id)

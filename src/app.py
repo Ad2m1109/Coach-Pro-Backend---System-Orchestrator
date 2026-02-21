@@ -10,6 +10,7 @@ from typing import Optional, Dict, Any
 from database import get_db, Connection
 from services.user_service import UserService
 from models.user import User, UserCreate
+from rbac import derive_app_role, permissions_for_role
 
 import os
 
@@ -109,16 +110,10 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
     }
 
     if user.user_type == "owner":
-        # Get user team/club for claims
-        from services.team_service import TeamService
-        team_service = TeamService(db)
-        user_teams = team_service.get_all_teams(user.id)
-        club_id = user_teams[0].id if user_teams else "no-club"
-        
+        app_role = derive_app_role(user.user_type, None)
         token_data.update({
-            "role": "coach",
-            "club_id": club_id,
-            "permissions": ["video_analysis", "tactics_editor"]
+            "app_role": app_role,
+            "app_permissions": permissions_for_role(app_role),
         })
     
     elif user.user_type == "staff":
@@ -133,11 +128,14 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
                 detail="Staff record not found",
             )
         
+        app_role = derive_app_role(user.user_type, staff.role)
         token_data.update({
             "staff_id": staff.id,
             "team_id": staff.team_id,
             "permission_level": staff.permission_level,
             "role": staff.role,
+            "app_role": app_role,
+            "app_permissions": permissions_for_role(app_role),
         })
 
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
@@ -150,6 +148,11 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
 @app.post("/api/register", tags=["Authentication"])
 async def register_user(user_create: UserCreate, db: Connection = Depends(get_db)):
     user_service = UserService(db)
+    if user_service.count_users() > 0:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Self-registration is disabled. Ask account manager to create your account.",
+        )
     existing_user = user_service.get_user_by_email(email=user_create.email)
     if existing_user:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered")
@@ -166,4 +169,3 @@ async def register_user(user_create: UserCreate, db: Connection = Depends(get_db
 @app.get("/", tags=["Root"])
 async def read_root():
     return {"message": "Welcome to the Football Match Analysis API"}
-
