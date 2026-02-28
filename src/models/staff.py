@@ -30,7 +30,6 @@ class StaffCreateWithAccount(BaseModel):
     team_id: str
     name: str
     role: StaffRoleEnum
-    permission_level: PermissionLevelEnum
     email: EmailStr
     password: str
 

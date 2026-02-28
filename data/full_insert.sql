@@ -206,11 +206,11 @@ SET @staff_id_1 = UUID();
 SET @staff_id_2 = UUID();
 SET @staff_id_3 = UUID();
 SET @staff_id_4 = UUID();
-INSERT INTO staff (id, team_id, user_id, name, role, permission_level, email) VALUES
-(@staff_id_1, @team_id_new, @coach_user_id, 'Adem Coach', 'head_coach', 'full_access', 'coach@example.com'),
-(@staff_id_2, @team_id_new, @assistant_user_id, 'Moez Assistant', 'assistant_coach', 'full_access', 'assistant@example.com'),
-(@staff_id_3, @team_id_new, @analyst_user_id, 'John Analyst', 'analyst', 'notes_only', 'analyst@example.com'),
-(@staff_id_4, @team_id_new, @player_user_id, 'Ali Player', 'player', 'view_only', 'player@example.com');
+INSERT INTO staff (id, team_id, user_id, name, role, email) VALUES
+(@staff_id_1, @team_id_new, @coach_user_id, 'Adem Coach', 'head_coach', 'coach@example.com'),
+(@staff_id_2, @team_id_new, @assistant_user_id, 'Moez Assistant', 'assistant_coach', 'assistant@example.com'),
+(@staff_id_3, @team_id_new, @analyst_user_id, 'John Analyst', 'analyst', 'analyst@example.com'),
+(@staff_id_4, @team_id_new, @player_user_id, 'Ali Player', 'player', 'player@example.com');
 
 -- Insert Match Notes for the existing match
 INSERT INTO match_notes (id, match_id, user_id, content, note_type, video_timestamp) VALUES

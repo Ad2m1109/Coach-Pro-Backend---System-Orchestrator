@@ -31,9 +31,10 @@ class StaffService:
             
             # Create staff record
             staff_id = str(uuid.uuid4())
+            permission_level = self._permission_level_for_role(staff_data.role.value)
             cursor.execute(
                 "INSERT INTO staff (id, team_id, user_id, name, role, permission_level, email) VALUES (%s, %s, %s, %s, %s, %s, %s)",
-                (staff_id, staff_data.team_id, user_id, staff_data.name, staff_data.role.value, staff_data.permission_level.value, staff_data.email)
+                (staff_id, staff_data.team_id, user_id, staff_data.name, staff_data.role.value, permission_level, staff_data.email)
             )
             
             self.db_connection.commit()
@@ -47,12 +48,13 @@ class StaffService:
         if staff.team_id not in user_team_ids:
             raise ValueError("Team not owned by current user.")
         with self.db_connection.cursor() as cursor:
+            permission_level = self._permission_level_for_role(staff.role.value if staff.role else None)
             sql = "INSERT INTO staff (id, team_id, name, role, permission_level, email, user_id) VALUES (UUID(), %s, %s, %s, %s, %s, %s)"
             cursor.execute(sql, (
                 staff.team_id, 
                 staff.name, 
                 staff.role.value if staff.role else None,
-                staff.permission_level.value,
+                permission_level,
                 staff.email,
                 staff.user_id
             ))
@@ -83,18 +85,31 @@ class StaffService:
         if staff_update.team_id not in user_team_ids:
             raise ValueError("Team not owned by current user.")
         with self.db_connection.cursor() as cursor:
+            permission_level = self._permission_level_for_role(staff_update.role.value if staff_update.role else None)
             sql = "UPDATE staff SET team_id = %s, name = %s, role = %s, permission_level = %s, email = %s WHERE id = %s AND team_id IN %s"
             cursor.execute(sql, (
                 staff_update.team_id, 
                 staff_update.name, 
                 staff_update.role.value if staff_update.role else None, 
-                staff_update.permission_level.value,
+                permission_level,
                 staff_update.email,
                 staff_id, 
                 user_team_ids
             ))
             self.db_connection.commit()
             return self.get_staff(staff_id, user_team_ids)
+
+    @staticmethod
+    def _permission_level_for_role(role: Optional[str]) -> str:
+        """Derive legacy permission level from fixed staff role policy."""
+        role_to_permission = {
+            "head_coach": PermissionLevelEnum.full_access.value,
+            "assistant_coach": PermissionLevelEnum.view_only.value,
+            "analyst": PermissionLevelEnum.notes_only.value,
+            "physio": PermissionLevelEnum.view_only.value,
+            "player": PermissionLevelEnum.view_only.value,
+        }
+        return role_to_permission.get(role or "", PermissionLevelEnum.view_only.value)
 
     def delete_staff(self, staff_id: str, user_team_ids: List[str]) -> bool:
         with self.db_connection.cursor() as cursor:

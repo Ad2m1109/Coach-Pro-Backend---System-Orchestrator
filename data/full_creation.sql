@@ -264,7 +264,26 @@ BEGIN IF NEW.id IS NULL THEN SET NEW.id = UUID(); END IF; END//
 CREATE TRIGGER before_players_insert BEFORE INSERT ON players FOR EACH ROW
 BEGIN IF NEW.id IS NULL THEN SET NEW.id = UUID(); END IF; END//
 CREATE TRIGGER before_staff_insert BEFORE INSERT ON staff FOR EACH ROW
-BEGIN IF NEW.id IS NULL THEN SET NEW.id = UUID(); END IF; END//
+BEGIN
+    IF NEW.id IS NULL THEN SET NEW.id = UUID(); END IF;
+    IF NEW.role = 'head_coach' THEN
+        SET NEW.permission_level = 'full_access';
+    ELSEIF NEW.role = 'analyst' THEN
+        SET NEW.permission_level = 'notes_only';
+    ELSE
+        SET NEW.permission_level = 'view_only';
+    END IF;
+END//
+CREATE TRIGGER before_staff_update BEFORE UPDATE ON staff FOR EACH ROW
+BEGIN
+    IF NEW.role = 'head_coach' THEN
+        SET NEW.permission_level = 'full_access';
+    ELSEIF NEW.role = 'analyst' THEN
+        SET NEW.permission_level = 'notes_only';
+    ELSE
+        SET NEW.permission_level = 'view_only';
+    END IF;
+END//
 CREATE TRIGGER before_matches_insert BEFORE INSERT ON matches FOR EACH ROW
 BEGIN IF NEW.id IS NULL THEN SET NEW.id = UUID(); END IF; END//
 CREATE TRIGGER before_match_events_insert BEFORE INSERT ON match_events FOR EACH ROW
