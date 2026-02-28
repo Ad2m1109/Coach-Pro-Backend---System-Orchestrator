@@ -109,18 +109,60 @@ INSERT INTO match_lineups (id, match_id, team_id, formation_id, is_starting, pla
 (UUID(), @match_id_new, @team_id_new, @formation_id_433, TRUE, @p_new_11, '0.9,0.2');
 
 -- Insert Player Match Statistics for the New Team's players (added id per row)
-INSERT INTO player_match_statistics (id, match_id, player_id, minutes_played, shots, shots_on_target, passes, accurate_passes, tackles, key_passes, player_xg, progressive_carries, press_resistance_success_rate, defensive_coverage_km, notes, rating) VALUES
-(UUID(), @match_id_new, @p_new_1, 90, 0, 0, 20, 18, 0, 0, 0.0, 0, 100.0, 0.5, 'Solid goalkeeping, few saves needed.', 7.0),
-(UUID(), @match_id_new, @p_new_10, 90, 5, 3, 25, 20, 1, 2, 1.2, 8, 90.0, 3.0, 'Scored two goals, clinical finishing.', 9.5);
+-- Insert Player Match Statistics for the New Team's players (comprehensive data for all starting players)
+INSERT INTO player_match_statistics (id, match_id, player_id, minutes_played, shots, shots_on_target, passes, accurate_passes, tackles, interceptions, clearances, saves, fouls_committed, fouls_suffered, offsides, distance_covered_km, sprint_count, sprint_distance_m, avg_speed_kmh, max_speed_kmh, player_xg, key_passes, progressive_carries, press_resistance_success_rate, defensive_coverage_km, notes, rating) VALUES
+(UUID(), @match_id_new, @p_new_1, 90, 0, 0, 25, 22, 0, 1, 2, 4, 0, 0, 0, 4.5, 2, 50.0, 5.2, 18.5, 0.0, 0, 0, 100.0, 0.5, 'Commanded the box well, accurate distribution.', 7.5),
+(UUID(), @match_id_new, @p_new_2, 90, 0, 0, 45, 40, 3, 2, 1, 0, 1, 1, 0, 9.8, 15, 320.0, 7.5, 28.2, 0.05, 1, 3, 85.0, 4.5, 'Constant threat on the overlap.', 7.8),
+(UUID(), @match_id_new, @p_new_3, 90, 1, 0, 50, 48, 4, 3, 5, 0, 1, 0, 0, 10.2, 8, 150.0, 6.8, 26.5, 0.1, 0, 1, 90.0, 5.0, 'Strong aerial presence, dominant in duels.', 8.0),
+(UUID(), @match_id_new, @p_new_4, 90, 0, 0, 55, 52, 2, 4, 4, 0, 0, 0, 0, 9.5, 6, 110.0, 6.5, 25.8, 0.0, 0, 2, 88.0, 4.8, 'Excellent reading of the game.', 7.9),
+(UUID(), @match_id_new, @p_new_5, 90, 0, 0, 42, 38, 2, 1, 2, 0, 1, 2, 0, 10.5, 18, 410.0, 7.8, 30.1, 0.03, 2, 4, 75.0, 4.0, 'High energy performance down the right.', 7.7),
+(UUID(), @match_id_new, @p_new_6, 90, 1, 1, 65, 60, 5, 3, 1, 0, 2, 1, 0, 11.2, 5, 80.0, 7.2, 24.5, 0.15, 1, 2, 92.0, 6.0, 'The engine room, broke up play effectively.', 8.2),
+(UUID(), @match_id_new, @p_new_7, 90, 2, 1, 70, 65, 2, 2, 0, 0, 1, 2, 0, 10.8, 7, 120.0, 7.0, 26.8, 0.25, 4, 5, 80.0, 5.5, 'Creative hub, dictated the tempo.', 8.5),
+(UUID(), @match_id_new, @p_new_8, 90, 3, 2, 48, 42, 1, 0, 0, 0, 0, 3, 0, 9.2, 10, 220.0, 6.9, 27.5, 0.45, 5, 8, 70.0, 3.0, 'Magical between the lines, assisted twice.', 9.0),
+(UUID(), @match_id_new, @p_new_9, 70, 4, 2, 35, 30, 0, 0, 0, 0, 1, 1, 1, 8.5, 22, 580.0, 8.2, 32.8, 0.65, 2, 6, 60.0, 2.5, 'Nightmare for defenders, explosive pace.', 8.4),
+(UUID(), @match_id_new, @p_new_10, 90, 5, 3, 28, 22, 1, 0, 0, 0, 0, 1, 2, 8.8, 14, 380.0, 7.1, 31.4, 1.25, 1, 3, 90.0, 2.8, 'Clinical finisher, scored two critical goals.', 9.5),
+(UUID(), @match_id_new, @p_new_11, 20, 1, 1, 12, 10, 0, 1, 0, 0, 0, 1, 0, 2.8, 5, 140.0, 8.5, 33.2, 0.15, 1, 2, 65.0, 1.2, 'Impact sub, energetic cameo.', 7.2);
 
 -- Insert Team Match Statistics for the New Team (id added)
-INSERT INTO match_team_statistics (id, match_id, team_id, possession_percentage, total_shots, shots_on_target, expected_goals, pressures, final_third_passes, build_up_patterns, defensive_block_patterns, high_turnover_zones_data, set_piece_xg_breakdown_data, transition_speed_data) VALUES
-(UUID(), @match_id_new, @team_id_new, 60.0, 15, 8, 2.5, 120, 70,
-    '{"left_side_progression_percent": 65, "most_frequent_pass_chain": ["CB Gamma", "CM Eta", "ST Kappa"]}',
-    '{"out_of_possession_formation": "4-4-2", "duel_success_in_box_percent": 70}',
-    '{"zone1": 6, "zone2": 4}',
-    '{"corners": 0.6, "free_kicks": 0.4}',
-    '{"attack_to_defense_sec": 3.0, "defense_to_attack_sec": 2.5}');
+-- Insert Team Match Statistics for the New Team (comprehensive example for visualization)
+INSERT INTO match_team_statistics (id, match_id, team_id, possession_percentage, total_shots, shots_on_target, expected_goals, pressures, final_third_passes, pass_network_data, zone_analysis_data, tactical_weakness_data, build_up_patterns, defensive_block_patterns, high_turnover_zones_data, set_piece_xg_breakdown_data, transition_speed_data) VALUES
+(UUID(), @match_id_new, @team_id_new, 62.5, 18, 9, 3.12, 145, 82,
+    '{"nodes": [
+        {"id": "1", "name": "Alpha", "team": "team_a", "avg_x": 0.5, "avg_y": 0.9},
+        {"id": "2", "name": "Beta", "team": "team_a", "avg_x": 0.1, "avg_y": 0.6},
+        {"id": "3", "name": "Gamma", "team": "team_a", "avg_x": 0.35, "avg_y": 0.75},
+        {"id": "4", "name": "Delta", "team": "team_a", "avg_x": 0.65, "avg_y": 0.75},
+        {"id": "5", "name": "Epsilon", "team": "team_a", "avg_x": 0.9, "avg_y": 0.6},
+        {"id": "6", "name": "Zeta", "team": "team_a", "avg_x": 0.5, "avg_y": 0.55},
+        {"id": "7", "name": "Eta", "team": "team_a", "avg_x": 0.3, "avg_y": 0.4},
+        {"id": "8", "name": "Theta", "team": "team_a", "avg_x": 0.7, "avg_y": 0.4},
+        {"id": "9", "name": "Iota", "team": "team_a", "avg_x": 0.15, "avg_y": 0.25},
+        {"id": "10", "name": "Kappa", "team": "team_a", "avg_x": 0.5, "avg_y": 0.15},
+        {"id": "11", "name": "Lambda", "team": "team_a", "avg_x": 0.85, "avg_y": 0.25}
+    ], "edges": [
+        {"source": "3", "target": "4", "count": 18},
+        {"source": "3", "target": "6", "count": 22},
+        {"source": "4", "target": "6", "count": 20},
+        {"source": "6", "target": "7", "count": 25},
+        {"source": "6", "target": "8", "count": 28},
+        {"source": "7", "target": "9", "count": 15},
+        {"source": "8", "target": "11", "count": 17},
+        {"source": "7", "target": "10", "count": 12},
+        {"source": "8", "target": "10", "count": 14},
+        {"source": "2", "target": "3", "count": 14},
+        {"source": "5", "target": "4", "count": 12},
+        {"source": "1", "target": "3", "count": 8},
+        {"source": "1", "target": "4", "count": 7},
+        {"source": "2", "target": "6", "count": 10},
+        {"source": "5", "target": "6", "count": 9}
+    ]}',
+    '{"left": {"attacks": 28, "shots": 5}, "center": {"attacks": 45, "shots": 10}, "right": {"attacks": 22, "shots": 3}}',
+    '{"exposed_defender": "RB Epsilon", "weak_side": "right", "reason": "Consistent 2v1 overloads on the right flank"}',
+    '{"left_side_progression_percent": 40, "center_progression_percent": 45, "right_side_progression_percent": 15}',
+    '{"out_of_possession_formation": "4-1-4-1", "defensive_line_height_m": 42}',
+    '{"zone_A": 12, "zone_B": 15, "zone_C": 8}',
+    '{"corners": 0.95, "direct_free_kicks": 0.42, "indirect_free_kicks": 0.38}',
+    '{"def_to_atk_mps": 7.2, "atk_to_def_mps": 5.8}');
 
 -- Insert Players for the Opponent Team
 SET @opp_p_1 = UUID(); SET @opp_p_2 = UUID(); SET @opp_p_3 = UUID(); SET @opp_p_4 = UUID();
@@ -155,16 +197,8 @@ INSERT INTO match_lineups (id, match_id, team_id, formation_id, is_starting, pla
 (UUID(), @match_id_new, @team_id_opponent, @formation_id_442, TRUE, @opp_p_11, '0.7,0.8');
 
 -- Insert Player Match Statistics for remaining players of 'My Awesome Team' (ids added)
-INSERT INTO player_match_statistics (id, match_id, player_id, minutes_played, shots, shots_on_target, passes, accurate_passes, tackles, interceptions, clearances, saves, fouls_committed, fouls_suffered, offsides, distance_covered_km, player_xg, key_passes, progressive_carries, press_resistance_success_rate, defensive_coverage_km, notes, rating) VALUES
-(UUID(), @match_id_new, @p_new_2, 90, 0, 0, 45, 40, 3, 2, 1, 0, 1, 1, 0, 9.8, 0.0, 0, 0, 85.0, 4.5, 'Solid defensive performance.', 7.2),
-(UUID(), @match_id_new, @p_new_3, 90, 1, 0, 50, 48, 4, 3, 2, 0, 0, 1, 0, 10.5, 0.1, 0, 0, 90.0, 5.0, 'Strong in aerial duels.', 7.5),
-(UUID(), @match_id_new, @p_new_4, 90, 0, 0, 55, 52, 3, 2, 2, 0, 1, 0, 0, 10.0, 0.0, 0, 0, 88.0, 4.8, 'Good positioning and interceptions.', 7.3),
-(UUID(), @match_id_new, @p_new_5, 90, 1, 0, 48, 42, 2, 1, 0, 0, 1, 2, 0, 9.5, 0.1, 1, 2, 75.0, 4.0, 'Active on the right flank.', 7.0),
-(UUID(), @match_id_new, @p_new_6, 90, 1, 1, 60, 55, 5, 4, 1, 0, 2, 3, 0, 11.0, 0.2, 2, 3, 92.0, 6.0, 'Controlled the midfield.', 8.0),
-(UUID(), @match_id_new, @p_new_7, 90, 2, 1, 65, 60, 2, 1, 0, 0, 1, 1, 0, 10.8, 0.3, 3, 4, 80.0, 5.5, 'Key passes and good link-up play.', 8.2),
-(UUID(), @match_id_new, @p_new_8, 90, 3, 2, 50, 45, 1, 0, 0, 0, 0, 1, 0, 9.0, 0.5, 4, 6, 70.0, 3.0, 'Creative force, assisted a goal.', 8.5),
-(UUID(), @match_id_new, @p_new_9, 90, 4, 2, 30, 25, 0, 0, 0, 0, 1, 2, 1, 8.5, 0.7, 2, 5, 60.0, 2.5, 'Dangerous on the left wing.', 7.8),
-(UUID(), @match_id_new, @p_new_11, 90, 3, 1, 32, 28, 0, 0, 0, 0, 0, 1, 0, 8.8, 0.6, 1, 4, 65.0, 2.8, 'Good crosses and runs.', 7.6);
+-- Remove redundant second insert of player statistics as they were already inserted in the comprehensive block above
+-- DELETE the following block if you are applying these changes manually
 
 -- Opponent FC players statistics (ids added)
 INSERT INTO player_match_statistics (id, match_id, player_id, minutes_played, shots, shots_on_target, passes, accurate_passes, tackles, interceptions, clearances, saves, fouls_committed, fouls_suffered, offsides, distance_covered_km, player_xg, key_passes, progressive_carries, press_resistance_success_rate, defensive_coverage_km, notes, rating) VALUES

@@ -10,8 +10,8 @@ class PlayerMatchStatisticsService:
         # This requires fetching match details, which is complex here.
         # For simplicity, we'll assume match_id is valid and linked to user's team via MatchService.
         with self.db_connection.cursor() as cursor:
-            sql = "INSERT INTO player_match_statistics (id, match_id, player_id, minutes_played, shots, shots_on_target, passes, accurate_passes, tackles, interceptions, clearances, saves, fouls_committed, fouls_suffered, offsides, distance_covered_km, notes, rating) VALUES (UUID(), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
-            cursor.execute(sql, (stats.match_id, stats.player_id, stats.minutes_played, stats.shots, stats.shots_on_target, stats.passes, stats.accurate_passes, stats.tackles, stats.interceptions, stats.clearances, stats.saves, stats.fouls_committed, stats.fouls_suffered, stats.offsides, stats.distance_covered_km, stats.notes, stats.rating))
+            sql = "INSERT INTO player_match_statistics (id, match_id, player_id, minutes_played, shots, shots_on_target, passes, accurate_passes, tackles, interceptions, clearances, saves, fouls_committed, fouls_suffered, offsides, distance_covered_km, sprint_count, sprint_distance_m, avg_speed_kmh, max_speed_kmh, notes, rating) VALUES (UUID(), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+            cursor.execute(sql, (stats.match_id, stats.player_id, stats.minutes_played, stats.shots, stats.shots_on_target, stats.passes, stats.accurate_passes, stats.tackles, stats.interceptions, stats.clearances, stats.saves, stats.fouls_committed, stats.fouls_suffered, stats.offsides, stats.distance_covered_km, stats.sprint_count, stats.sprint_distance_m, stats.avg_speed_kmh, stats.max_speed_kmh, stats.notes, stats.rating))
             self.db_connection.commit()
             cursor.execute("SELECT * FROM player_match_statistics WHERE match_id = %s AND player_id = %s ORDER BY id DESC LIMIT 1", (stats.match_id, stats.player_id))
             new_stats = cursor.fetchone()
@@ -44,8 +44,8 @@ class PlayerMatchStatisticsService:
         # This requires fetching match details, which is complex here.
         # For simplicity, we'll assume match_id is valid and linked to user's team via MatchService.
         with self.db_connection.cursor() as cursor:
-            sql = "UPDATE player_match_statistics SET match_id = %s, player_id = %s, minutes_played = %s, shots = %s, shots_on_target = %s, passes = %s, accurate_passes = %s, tackles = %s, interceptions = %s, clearances = %s, saves = %s, fouls_committed = %s, fouls_suffered = %s, offsides = %s, distance_covered_km = %s, notes = %s, rating = %s WHERE id = %s"
-            cursor.execute(sql, (stats_update.match_id, stats_update.player_id, stats_update.minutes_played, stats_update.shots, stats_update.shots_on_target, stats_update.passes, stats_update.accurate_passes, stats_update.tackles, stats_update.interceptions, stats_update.clearances, stats_update.saves, stats_update.fouls_committed, stats_update.fouls_suffered, stats_update.offsides, stats_update.distance_covered_km, stats_update.notes, stats_update.rating, stat_id))
+            sql = "UPDATE player_match_statistics SET match_id = %s, player_id = %s, minutes_played = %s, shots = %s, shots_on_target = %s, passes = %s, accurate_passes = %s, tackles = %s, interceptions = %s, clearances = %s, saves = %s, fouls_committed = %s, fouls_suffered = %s, offsides = %s, distance_covered_km = %s, sprint_count = %s, sprint_distance_m = %s, avg_speed_kmh = %s, max_speed_kmh = %s, notes = %s, rating = %s WHERE id = %s"
+            cursor.execute(sql, (stats_update.match_id, stats_update.player_id, stats_update.minutes_played, stats_update.shots, stats_update.shots_on_target, stats_update.passes, stats_update.accurate_passes, stats_update.tackles, stats_update.interceptions, stats_update.clearances, stats_update.saves, stats_update.fouls_committed, stats_update.fouls_suffered, stats_update.offsides, stats_update.distance_covered_km, stats_update.sprint_count, stats_update.sprint_distance_m, stats_update.avg_speed_kmh, stats_update.max_speed_kmh, stats_update.notes, stats_update.rating, stat_id))
             self.db_connection.commit()
             return self.get_player_match_statistics(stat_id, user_team_ids)
 

@@ -17,7 +17,11 @@ class PlayerMatchStatisticsBase(BaseModel):
     fouls_committed: Optional[int] = 0
     fouls_suffered: Optional[int] = 0
     offsides: Optional[int] = 0
-    distance_covered_km: Optional[Decimal] = None
+    distance_covered_km: Optional[float] = None
+    sprint_count: Optional[int] = 0
+    sprint_distance_m: Optional[float] = 0.0
+    avg_speed_kmh: Optional[float] = 0.0
+    max_speed_kmh: Optional[float] = 0.0
     notes: Optional[str] = None
     rating: Optional[float] = None
 
