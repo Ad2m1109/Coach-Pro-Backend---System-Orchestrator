@@ -143,6 +143,7 @@ class TrackingEngineClient:
                 'processing_time_seconds': response.result.processing_time_seconds,
                 'fps': response.result.fps,
                 'error_message': response.result.error_message,
+                'tactical_advisory_path': response.result.tactical_advisory_path,
             }
         
         return result

@@ -47,4 +47,7 @@ message AnalysisResult {
   
   // Error information (if any)
   string error_message = 12;
+  
+  // Tactical AI Advisory (AI Tactical Report)
+  string tactical_advisory_path = 13;
 }

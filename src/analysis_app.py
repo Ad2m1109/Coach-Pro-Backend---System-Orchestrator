@@ -373,6 +373,7 @@ def _build_outputs_for_run(run_id: str) -> Dict[str, str]:
         "all_players_grid_image_path": f"outputs/heatmaps/{run_id}all_players_grid.png",
         "movement_trail_image_path": f"outputs/analytics/{run_id}movement_trail.png",
         "possession_chart_image_path": f"outputs/analytics/{run_id}possession_analysis.png",
+        "tactical_advisory_path": f"outputs/analytics/{run_id}advisory.json",
     }
 
     outputs: Dict[str, str] = {}

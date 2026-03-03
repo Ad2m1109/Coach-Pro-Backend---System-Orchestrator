@@ -214,14 +214,40 @@ INSERT INTO player_match_statistics (id, match_id, player_id, minutes_played, sh
 (UUID(), @match_id_new, @opp_p_10, 90, 3, 1, 20, 15, 0, 0, 0, 0, 1, 2, 1, 7.8, 0.6, 1, 1, 50.0, 1.5, 'Isolated upfront.', 6.2),
 (UUID(), @match_id_new, @opp_p_11, 90, 2, 0, 18, 12, 0, 0, 0, 0, 0, 1, 0, 7.5, 0.5, 0, 1, 45.0, 1.2, 'Struggled to get involved.', 5.8);
 
--- Insert Team Match Statistics for the Opponent Team (id added)
-INSERT INTO match_team_statistics (id, match_id, team_id, possession_percentage, total_shots, shots_on_target, expected_goals, pressures, final_third_passes, high_turnover_zones_data, set_piece_xg_breakdown_data, transition_speed_data, build_up_patterns, defensive_block_patterns) VALUES
-(UUID(), @match_id_new, @team_id_opponent, 39.0, 10, 4, 1.0, 100, 50,
-    '{"zone1": 3, "zone2": 2}',
-    '{"corners": 0.3, "free_kicks": 0.2}',
-    '{"attack_to_defense_sec": 4.0, "defense_to_attack_sec": 3.5}',
-    '{"long_ball_percent": 70, "counter_attack_success_rate": 40}',
-    '{"defensive_line": "deep", "pressing_intensity": "low"}');
+-- Insert Team Match Statistics for the Opponent Team (comprehensive example for visualization)
+INSERT INTO match_team_statistics (id, match_id, team_id, possession_percentage, total_shots, shots_on_target, expected_goals, pressures, final_third_passes, pass_network_data, zone_analysis_data, tactical_weakness_data, high_turnover_zones_data, set_piece_xg_breakdown_data, transition_speed_data, build_up_patterns, defensive_block_patterns) VALUES
+(UUID(), @match_id_new, @team_id_opponent, 37.5, 10, 4, 1.12, 105, 45,
+    '{"nodes": [
+        {"id": "o1", "name": "Opponent GK", "team": "team_b", "avg_x": 0.5, "avg_y": 0.1},
+        {"id": "o2", "name": "Opponent LB", "team": "team_b", "avg_x": 0.1, "avg_y": 0.3},
+        {"id": "o3", "name": "Opponent CB1", "team": "team_b", "avg_x": 0.35, "avg_y": 0.25},
+        {"id": "o4", "name": "Opponent CB2", "team": "team_b", "avg_x": 0.65, "avg_y": 0.25},
+        {"id": "o5", "name": "Opponent RB", "team": "team_b", "avg_x": 0.9, "avg_y": 0.3},
+        {"id": "o6", "name": "Opponent CM1", "team": "team_b", "avg_x": 0.35, "avg_y": 0.5},
+        {"id": "o7", "name": "Opponent CM2", "team": "team_b", "avg_x": 0.65, "avg_y": 0.5},
+        {"id": "o8", "name": "Opponent LW", "team": "team_b", "avg_x": 0.2, "avg_y": 0.75},
+        {"id": "o9", "name": "Opponent RW", "team": "team_b", "avg_x": 0.8, "avg_y": 0.75},
+        {"id": "o10", "name": "Opponent ST1", "team": "team_b", "avg_x": 0.4, "avg_y": 0.9},
+        {"id": "o11", "name": "Opponent ST2", "team": "team_b", "avg_x": 0.6, "avg_y": 0.9}
+    ], "edges": [
+        {"source": "o1", "target": "o3", "count": 12},
+        {"source": "o1", "target": "o4", "count": 10},
+        {"source": "o3", "target": "o4", "count": 15},
+        {"source": "o3", "target": "o6", "count": 14},
+        {"source": "o4", "target": "o7", "count": 12},
+        {"source": "o6", "target": "o7", "count": 18},
+        {"source": "o6", "target": "o8", "count": 22},
+        {"source": "o7", "target": "o9", "count": 20},
+        {"source": "o8", "target": "o10", "count": 8},
+        {"source": "o9", "target": "o11", "count": 7}
+    ]}',
+    '{"left": {"attacks": 15, "shots": 2}, "center": {"attacks": 20, "shots": 5}, "right": {"attacks": 10, "shots": 3}}',
+    '{"exposed_defender": "CB2 Opponent CB2", "weak_side": "center", "reason": "Large gap between CBs during transitions"}',
+    '{"zone_A": 4, "zone_B": 8, "zone_C": 3}',
+    '{"corners": 0.25, "direct_free_kicks": 0.15, "indirect_free_kicks": 0.1}',
+    '{"def_to_atk_mps": 5.2, "atk_to_def_mps": 4.8}',
+    '{"long_ball_percent": 65, "counter_attack_success_rate": 35}',
+    '{"out_of_possession_formation": "4-4-2", "defensive_line_height_m": 35}');
 
 -- Insert Match Events (ids added)
 INSERT INTO match_events (id, match_id, player_id, event_type, minute, video_timestamp, coordinates) VALUES
