@@ -66,6 +66,11 @@ async def get_current_active_user(
 ):
     if not current_user.is_active:
         raise HTTPException(status_code=400, detail="Inactive user")
+
+    # The AI assistant is accessible to all active authenticated users
+    if request.url.path.startswith("/api/assistant"):
+        return current_user
+
     app_role = _get_app_role_from_token(token)
     path = request.url.path
     method = request.method.upper()
