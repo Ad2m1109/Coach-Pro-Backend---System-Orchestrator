@@ -25,7 +25,7 @@ class AnalyticalService:
         q = question.lower()
         if any(w in q for w in ["improve", "trend", "increase"]):
             return "top_improvers"
-        if any(w in q for w in ["highest", "average"]):
+        if any(w in q for w in ["highest", "average", "best", "top"]):
             return "highest_average_rating"
         if "formation" in q and ("press" in q or "pressure" in q):
             return "best_pressing_formation"
@@ -44,7 +44,10 @@ class AnalyticalService:
             if query_type == "top_improvers":
                 result_text = self._get_top_improving_players()
             elif query_type == "highest_average_rating":
-                result_text = self._get_highest_average_rating()
+                # Detect if the user wants just the last match specifically
+                q = question.lower()
+                window = 1 if any(w in q for w in ["last match", "last game", "previous match", "latest match"]) else 5
+                result_text = self._get_highest_average_rating(window_size=window)
             elif query_type == "best_pressing_formation":
                 result_text = self._get_best_pressing_formation()
 
@@ -159,8 +162,8 @@ class AnalyticalService:
         body = "\n".join([f"- {r['player_name']}: trend index +{r['trend']:.2f}" for r in rows])
         return header + body
 
-    def _get_highest_average_rating(self) -> str:
-        """Computes top 5 players by average rating over their last 5 matches."""
+    def _get_highest_average_rating(self, window_size: int = 5) -> str:
+        """Computes top 5 players by average rating over their last N matches."""
         sql = """
             WITH indexed_stats AS (
                 SELECT 
@@ -178,14 +181,14 @@ class AnalyticalService:
             SELECT player_name, player_id, AVG(rating) as avg_rating, 
                    COUNT(*) as pts, CONCAT(DATE(MIN(date_time)), ' to ', DATE(MAX(date_time))) as match_range
             FROM indexed_stats
-            WHERE rn <= 5
+            WHERE rn <= %s
             GROUP BY player_id, player_name
             HAVING COUNT(*) >= 1
             ORDER BY avg_rating DESC
             LIMIT 5
         """
         with self.db.cursor() as cursor:
-            cursor.execute(sql, (self.user_id,))
+            cursor.execute(sql, (self.user_id, window_size))
             rows = cursor.fetchall()
 
         if not rows:
@@ -203,8 +206,9 @@ class AnalyticalService:
                 "data_points_count": r["pts"]
             })
 
-        header = "## ANALYTICAL_RESULT: HIGHEST AVERAGE RATINGS (Last 5 Matches)\n"
-        body = "\n".join([f"- {r['player_name']}: {r['avg_rating']:.2f} avg rating" for r in rows])
+        header_type = f"LAST MATCH" if window_size == 1 else f"Last {window_size} Matches"
+        header = f"## ANALYTICAL_RESULT: HIGHEST AVERAGE RATINGS ({header_type})\n"
+        body = "\n".join([f"- {r['player_name']}: {r['avg_rating']:.2f} rating" for r in rows])
         return header + body
 
     def _get_best_pressing_formation(self) -> str:

@@ -6,7 +6,7 @@ Orchestrates the AI Assistant pipeline:
 1. Intent Detection (IntentRouter)
 2. Targeted Retrieval (RetrievalService + TacticalKB)
 3. Context Building (ContextBuilder)
-4. LLM reasoning (Ollama)
+4. LLM reasoning (Remote Mistral via llm_client)
 """
 
 import httpx
@@ -22,6 +22,7 @@ from services.tactical_kb import get_tactical_concept
 from services.context_builder import ContextBuilder
 from services.analytical_service import AnalyticalService
 from services.tactical_memory_service import TacticalMemoryService
+from services.llm_client import call_llm
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -48,13 +49,7 @@ def set_system_mode(mode: SystemMode) -> None:
     _current_mode = mode
 
 
-# ------------------------------------------------------------------
-# Config
-# ------------------------------------------------------------------
 
-OLLAMA_API_URL = "http://localhost:11434/api/generate"
-OLLAMA_MODEL = "phi3:mini"
-OLLAMA_TIMEOUT = 120  # Total timeout for long reasoning sessions
 
 
 # ------------------------------------------------------------------
@@ -82,24 +77,7 @@ def build_prompt(question: str, context: str) -> str:
     )
 
 
-# ------------------------------------------------------------------
-# Ollama Caller (async)
-# ------------------------------------------------------------------
 
-async def call_ollama(prompt: str) -> str:
-    """Send a prompt to the local Ollama API."""
-    payload = {
-        "model": OLLAMA_MODEL,
-        "prompt": prompt,
-        "stream": False,
-        "options": {"temperature": 0},
-    }
-
-    async with httpx.AsyncClient(timeout=OLLAMA_TIMEOUT) as client:
-        response = await client.post(OLLAMA_API_URL, json=payload)
-        response.raise_for_status()
-        data = response.json()
-        return data.get("response", "").strip()
 
 
 # ------------------------------------------------------------------
@@ -254,7 +232,7 @@ async def query_assistant(question: str, db: Connection, user_id: str) -> dict:
 
         # E. Prompt & LLM
         prompt = build_prompt(question, context)
-        answer = await call_ollama(prompt)
+        answer = await call_llm(prompt)
         
         latency = round(time.time() - start_time, 2)
         
@@ -274,4 +252,4 @@ async def query_assistant(question: str, db: Connection, user_id: str) -> dict:
         return {"status": "error", "message": "Assistant timed out. Please try again."}
     except Exception as e:
         logger.error(f"[Assistant] Error: {str(e)}")
-        return {"status": "error", "message": "Assistant temporarily unavailable."}
+        return {"status": "error", "message": "LLM service unavailable"}

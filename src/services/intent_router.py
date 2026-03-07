@@ -35,7 +35,7 @@ MAX_TOKENS_TO_CHECK = 20
 ALPHA_ONLY_REGEX = re.compile(r"^[a-zA-Z]+$")
 
 # --- Keyword Sets ---
-KEYWORDS_ANALYTICAL = {"improve", "trend", "compare", "highest", "average", "increase", "decrease", "over", "last"}
+KEYWORDS_ANALYTICAL = {"improve", "trend", "compare", "highest", "average", "increase", "decrease", "over", "last", "best", "top"}
 KEYWORDS_PLAYER = {"player", "players", "jersey", "position", "rating", "stat", "stats"}
 KEYWORDS_MATCH = {"match", "matches", "game", "games", "result", "score", "opponent", "vs"}
 KEYWORDS_TACTICAL = {"formation", "tactics", "tactical", "press", "pressing", "block", "strategy", "style"}
