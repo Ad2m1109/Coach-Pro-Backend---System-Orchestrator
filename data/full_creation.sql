@@ -5,7 +5,9 @@ CREATE DATABASE IF NOT EXISTS soccer_analytics;
 USE soccer_analytics;
 
 -- Drop existing objects if they exist (for easy re-execution)
-DROP TABLE IF EXISTS analysis_runs, match_notes, match_team_statistics, match_lineups, player_match_statistics, video_segments, match_events, analysis_reports, staff, players, matches, teams, users, formations, reunions, training_sessions, events;
+DROP TABLE IF EXISTS tactical_insights, analysis_runs, match_notes, match_team_statistics, match_lineups, player_match_statistics, video_segments, match_events, analysis_reports, staff, players, matches, teams, users, formations, reunions, training_sessions, events;
+
+
 
 -- Independent Tables
 CREATE TABLE users (
@@ -19,6 +21,25 @@ CREATE TABLE users (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     last_login TIMESTAMP NULL
 );
+
+CREATE TABLE tactical_insights (
+    id CHAR(36) PRIMARY KEY,
+    user_id CHAR(36) NOT NULL,
+    insight_type VARCHAR(50) NOT NULL,
+    subject_type VARCHAR(50) NOT NULL,
+    subject_id CHAR(36),
+    metric_name VARCHAR(50) NOT NULL,
+    metric_value FLOAT NOT NULL,
+    window_definition VARCHAR(100),
+    match_range VARCHAR(255),
+    data_points_count INT DEFAULT 0,
+    insight_hash CHAR(64) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_user_insight (user_id, insight_hash),
+    INDEX idx_user_created (user_id, created_at DESC),
+    INDEX idx_subject (subject_id),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
 
 CREATE TABLE teams (
     id CHAR(36) PRIMARY KEY,
@@ -316,6 +337,8 @@ BEGIN IF NEW.id IS NULL THEN SET NEW.id = UUID(); END IF; END//
 CREATE TRIGGER before_match_team_statistics_insert BEFORE INSERT ON match_team_statistics FOR EACH ROW
 BEGIN IF NEW.id IS NULL THEN SET NEW.id = UUID(); END IF; END//
 CREATE TRIGGER before_match_notes_insert BEFORE INSERT ON match_notes FOR EACH ROW
+BEGIN IF NEW.id IS NULL THEN SET NEW.id = UUID(); END IF; END//
+CREATE TRIGGER before_tactical_insights_insert BEFORE INSERT ON tactical_insights FOR EACH ROW
 BEGIN IF NEW.id IS NULL THEN SET NEW.id = UUID(); END IF; END//
 DELIMITER ;
 
