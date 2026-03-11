@@ -19,12 +19,29 @@ message AnalysisRequest {
 // Streaming response with progress and final results
 message AnalysisResponse {
   string match_id = 1;
-  string status = 2;               // PENDING, PROCESSING, COMPLETED, FAILED
+  string status = 2;               // PENDING, PROCESSING, COMPLETED, FAILED, ALERT
   float progress = 3;              // 0.0 to 1.0
   string message = 4;
   
+  // Tactical Alert (populated when status is ALERT)
+  TacticalAlert alert = 6;
+
   // Final results (only populated when status is COMPLETED)
   AnalysisResult result = 5;
+}
+
+// Structured tactical alert packet for real-time intervention
+message TacticalAlert {
+  string alert_id = 1;
+  string timestamp = 2;
+  float severity_score = 3;
+  string severity_label = 4;
+  string category = 5;
+  string decision_type = 6;
+  string status = 7;               // ACTIVE, MONITORING, RESOLVED, ESCALATED
+  string action = 8;
+  int32 review_countdown = 9;
+  int32 category_trigger_count = 10;
 }
 
 // Complete analysis results

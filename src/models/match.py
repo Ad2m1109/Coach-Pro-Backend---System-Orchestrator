@@ -17,6 +17,7 @@ class MatchBase(BaseModel):
     status: Optional[MatchStatusEnum] = None
     home_score: Optional[int] = 0
     away_score: Optional[int] = 0
+    video_anchor_seconds: Optional[int] = None
 
 class MatchCreate(MatchBase):
     pass

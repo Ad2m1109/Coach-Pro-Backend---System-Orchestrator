@@ -264,6 +264,24 @@ CREATE TABLE match_notes (
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
+CREATE TABLE tactical_alerts (
+    id CHAR(36) PRIMARY KEY,
+    match_id CHAR(36) NOT NULL,
+    alert_id VARCHAR(50) NOT NULL UNIQUE,
+    timestamp VARCHAR(20) NOT NULL,
+    severity_score DECIMAL(5,4),
+    severity_label VARCHAR(20),
+    category VARCHAR(50),
+    decision_type VARCHAR(100),
+    status VARCHAR(50),
+    action TEXT,
+    review_countdown INT,
+    category_trigger_count INT,
+    feedback ENUM('none', 'accepted', 'dismissed') DEFAULT 'none',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (match_id) REFERENCES matches(id) ON DELETE CASCADE
+);
+
 -- UUID Triggers (add after all tables exist)
 DELIMITER //
 CREATE TRIGGER before_users_insert BEFORE INSERT ON users FOR EACH ROW
@@ -339,6 +357,8 @@ BEGIN IF NEW.id IS NULL THEN SET NEW.id = UUID(); END IF; END//
 CREATE TRIGGER before_match_notes_insert BEFORE INSERT ON match_notes FOR EACH ROW
 BEGIN IF NEW.id IS NULL THEN SET NEW.id = UUID(); END IF; END//
 CREATE TRIGGER before_tactical_insights_insert BEFORE INSERT ON tactical_insights FOR EACH ROW
+BEGIN IF NEW.id IS NULL THEN SET NEW.id = UUID(); END IF; END//
+CREATE TRIGGER before_tactical_alerts_insert BEFORE INSERT ON tactical_alerts FOR EACH ROW
 BEGIN IF NEW.id IS NULL THEN SET NEW.id = UUID(); END IF; END//
 DELIMITER ;
 

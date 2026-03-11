@@ -301,4 +301,46 @@ INSERT INTO video_segments (id, match_id, event_id, analysis_report_id, start_ti
 (UUID(), @match_id_new, NULL, @report_id_1, 900.0, 915.0, 'Goal 1 build-up', 'https://video.example.com/match1/goal1.mp4'),
 (UUID(), @match_id_new, NULL, @report_id_1, 3300.0, 3310.0, 'Goal 2 finishing touch', 'https://video.example.com/match1/goal2.mp4');
 
+-- Insert Sample Tactical Alerts
+INSERT INTO tactical_alerts (id, match_id, alert_id, timestamp, severity_score, severity_label, category, decision_type, status, action, review_countdown, category_trigger_count, feedback) VALUES
+(UUID(), @match_id_new, 'alert_001', '15:00', 0.85, 'CRITICAL', 'Formation Anomaly', 'PRESSING_ADJUSTMENT', 'ACTIVE', 'Switch to high-block pressing to counter wide overloads.', 3, 2, 'none'),
+(UUID(), @match_id_new, 'alert_002', '35:20', 0.65, 'HIGH', 'Spacing Anomaly', 'STRUCTURAL_COMPACTNESS_FIX', 'PENDING', 'Close vertical gaps between midfield and defense.', 2, 1, 'none'),
+(UUID(), @match_id_new, 'alert_003', '55:45', 0.45, 'MODERATE', 'Fatigue Warning', 'SUBSTITUTION_RECOMMENDATION', 'PENDING', 'Consider subbing out DM Zeta for fresh legs.', 5, 1, 'none');
+
+-- ---------------------------------------------------------------------------
+-- Simulation-ready match seed (NO prefilled events/statistics/alerts)
+-- Use this match from Flutter "Run Fake Match" button to generate everything.
+-- ---------------------------------------------------------------------------
+SET @match_id_sim = UUID();
+INSERT INTO matches (id, home_team_id, away_team_id, date_time, venue, status, home_score, away_score, event_id) VALUES
+(@match_id_sim, @team_id_new, @team_id_opponent, '2026-03-10 18:30:00', 'Simulation Ground', 'upcoming', 0, 0, @event_id_league);
+
+-- Home lineup for simulation match (4-3-3)
+INSERT INTO match_lineups (id, match_id, team_id, formation_id, is_starting, player_id, position_in_formation) VALUES
+(UUID(), @match_id_sim, @team_id_new, @formation_id_433, TRUE, @p_new_1, '0.5,0.95'),
+(UUID(), @match_id_sim, @team_id_new, @formation_id_433, TRUE, @p_new_2, '0.1,0.75'),
+(UUID(), @match_id_sim, @team_id_new, @formation_id_433, TRUE, @p_new_3, '0.3,0.8'),
+(UUID(), @match_id_sim, @team_id_new, @formation_id_433, TRUE, @p_new_4, '0.7,0.8'),
+(UUID(), @match_id_sim, @team_id_new, @formation_id_433, TRUE, @p_new_5, '0.9,0.75'),
+(UUID(), @match_id_sim, @team_id_new, @formation_id_433, TRUE, @p_new_6, '0.5,0.6'),
+(UUID(), @match_id_sim, @team_id_new, @formation_id_433, TRUE, @p_new_7, '0.3,0.5'),
+(UUID(), @match_id_sim, @team_id_new, @formation_id_433, TRUE, @p_new_8, '0.7,0.5'),
+(UUID(), @match_id_sim, @team_id_new, @formation_id_433, TRUE, @p_new_9, '0.1,0.2'),
+(UUID(), @match_id_sim, @team_id_new, @formation_id_433, TRUE, @p_new_10, '0.5,0.1'),
+(UUID(), @match_id_sim, @team_id_new, @formation_id_433, TRUE, @p_new_11, '0.9,0.2');
+
+-- Away lineup for simulation match (4-4-2)
+INSERT INTO match_lineups (id, match_id, team_id, formation_id, is_starting, player_id, position_in_formation) VALUES
+(UUID(), @match_id_sim, @team_id_opponent, @formation_id_442, TRUE, @opp_p_1, '0.5,0.05'),
+(UUID(), @match_id_sim, @team_id_opponent, @formation_id_442, TRUE, @opp_p_2, '0.1,0.25'),
+(UUID(), @match_id_sim, @team_id_opponent, @formation_id_442, TRUE, @opp_p_3, '0.3,0.2'),
+(UUID(), @match_id_sim, @team_id_opponent, @formation_id_442, TRUE, @opp_p_4, '0.7,0.2'),
+(UUID(), @match_id_sim, @team_id_opponent, @formation_id_442, TRUE, @opp_p_5, '0.9,0.25'),
+(UUID(), @match_id_sim, @team_id_opponent, @formation_id_442, TRUE, @opp_p_6, '0.1,0.5'),
+(UUID(), @match_id_sim, @team_id_opponent, @formation_id_442, TRUE, @opp_p_7, '0.3,0.5'),
+(UUID(), @match_id_sim, @team_id_opponent, @formation_id_442, TRUE, @opp_p_8, '0.7,0.5'),
+(UUID(), @match_id_sim, @team_id_opponent, @formation_id_442, TRUE, @opp_p_9, '0.9,0.5'),
+(UUID(), @match_id_sim, @team_id_opponent, @formation_id_442, TRUE, @opp_p_10, '0.3,0.8'),
+(UUID(), @match_id_sim, @team_id_opponent, @formation_id_442, TRUE, @opp_p_11, '0.7,0.8');
+
 -- End of full_insert.sql

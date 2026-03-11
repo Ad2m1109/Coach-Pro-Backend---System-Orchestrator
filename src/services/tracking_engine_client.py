@@ -129,6 +129,20 @@ class TrackingEngineClient:
             'progress': response.progress,
         }
         
+        if response.HasField('alert'):
+            result['alert'] = {
+                'alert_id': response.alert.alert_id,
+                'timestamp': response.alert.timestamp,
+                'severity_score': response.alert.severity_score,
+                'severity_label': response.alert.severity_label,
+                'category': response.alert.category,
+                'decision_type': response.alert.decision_type,
+                'status': response.alert.status,
+                'action': response.alert.action,
+                'review_countdown': response.alert.review_countdown,
+                'category_trigger_count': response.alert.category_trigger_count
+            }
+        
         if response.HasField('result'):
             result['result'] = {
                 'match_id': response.result.match_id,

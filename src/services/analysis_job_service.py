@@ -11,6 +11,7 @@ from typing import Optional, List
 from pathlib import Path
 from services.tracking_engine_client import TrackingEngineClient
 from models.analysis_report import AnalysisReport
+from services.tactical_alert_service import TacticalAlertService
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +22,7 @@ class AnalysisJobService:
     def __init__(self, db_connection):
         self.db_connection = db_connection
         self.engine_client = TrackingEngineClient()
+        self.alert_service = TacticalAlertService()
 
     def create_analysis_job(self, match_id: str, video_path: str, user_id: str) -> dict:
         """
@@ -61,6 +63,9 @@ class AnalysisJobService:
                 datetime.utcnow()
             ))
             self.db_connection.commit()
+            
+            # Clear previous alert history for this match
+            self.alert_service.clear_history(match_id)
         
         logger.info(f"Created analysis job {job_id} for match {match_id}")
         
@@ -93,8 +98,37 @@ class AnalysisJobService:
         """
         
         async def progress_callback(response):
-            """Update job progress in database"""
-            await self._update_job_progress(job_id, response)
+            """Update job progress and relay alerts."""
+            if response.status == "ALERT" and hasattr(response, 'alert'):
+                extra_event = {}
+                try:
+                    if response.message:
+                        parsed = json.loads(response.message)
+                        if isinstance(parsed, dict):
+                            extra_event = parsed
+                except Exception:
+                    extra_event = {}
+
+                await self.alert_service.broadcast_alert(match_id, {
+                    'alert_id': response.alert.alert_id,
+                    'decision_id': extra_event.get('decision_id', response.alert.alert_id),
+                    'match_id': match_id,
+                    'timestamp': response.alert.timestamp,
+                    'match_time': extra_event.get('match_time'),
+                    'severity_score': response.alert.severity_score,
+                    'severity_label': response.alert.severity_label,
+                    'category': response.alert.category,
+                    'decision_type': response.alert.decision_type,
+                    'trigger_metric': extra_event.get('trigger_metric'),
+                    'recommended_action': extra_event.get('recommended_action', response.alert.action),
+                    'status': response.alert.status,
+                    'action': response.alert.action,
+                    'review_countdown': response.alert.review_countdown,
+                    'category_trigger_count': response.alert.category_trigger_count,
+                    'feedback': 'none'
+                })
+            else:
+                await self._update_job_progress(job_id, response)
         
         try:
             # Submit to tracking engine

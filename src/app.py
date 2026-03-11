@@ -44,6 +44,8 @@ from controllers.match_team_statistics_controller import router as match_team_st
 from controllers.note_controller import router as note_router
 from controllers.analysis_controller import router as analysis_router
 from controllers.assistant_controller import router as assistant_router
+from controllers.tactical_alert_controller import router as tactical_alert_router
+# from controllers.simulation_controller import router as simulation_router
 
 app = FastAPI(
     title="Football Match Analysis API",
@@ -83,6 +85,21 @@ app.include_router(match_team_statistics_router, prefix="/api", tags=["Match Tea
 app.include_router(note_router, prefix="/api", tags=["Notes"])
 app.include_router(analysis_router, prefix="/api", tags=["Analysis"])
 app.include_router(assistant_router, prefix="/api/assistant", tags=["AI Assistant"])
+app.include_router(tactical_alert_router, tags=["Tactical Alerts"])
+
+from fastapi import WebSocket, WebSocketDisconnect
+from controllers.tactical_alert_controller import alert_service
+
+@app.websocket("/ws/alerts/{match_id}")
+async def tactical_alerts_websocket(websocket: WebSocket, match_id: str):
+    await alert_service.connect(match_id, websocket)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        alert_service.disconnect(match_id, websocket)
+    except Exception:
+        alert_service.disconnect(match_id, websocket)
 
 @app.post("/api/token", tags=["Authentication"])
 async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Connection = Depends(get_db)):

@@ -80,12 +80,25 @@ async def get_current_active_user(
         "/api/staff",
         "/api/teams",
     )
+    owner_allowed_extra_write_prefixes = (
+        "/api/decision/",
+    )
+    owner_allowed_extra_write_exact = {
+        "/api/decision/feedback",
+    }
 
     if app_role == APP_ROLE_ACCOUNT_MANAGER:
         if path.startswith("/api/"):
             # Account manager can view all modules.
             if method in ("GET", "HEAD", "OPTIONS"):
                 return current_user
+
+            # Tactical/decision simulation operations are explicitly allowed for owners.
+            if method in write_methods:
+                if path in owner_allowed_extra_write_exact:
+                    return current_user
+                if path.startswith(owner_allowed_extra_write_prefixes):
+                    return current_user
 
             # Account manager can modify team + account resources.
             if method in write_methods and path.startswith(manager_only_write_prefixes):

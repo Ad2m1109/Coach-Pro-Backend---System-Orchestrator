@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0e\x61nalysis.proto\x12\x08\x61nalysis\"}\n\x0f\x41nalysisRequest\x12\x12\n\nvideo_path\x18\x01 \x01(\t\x12\x10\n\x08match_id\x18\x02 \x01(\t\x12\x13\n\x0b\x66rame_limit\x18\x03 \x01(\x05\x12\x11\n\tskip_json\x18\x04 \x01(\x08\x12\x1c\n\x14\x63onfidence_threshold\x18\x05 \x01(\x02\"\x81\x01\n\x10\x41nalysisResponse\x12\x10\n\x08match_id\x18\x01 \x01(\t\x12\x0e\n\x06status\x18\x02 \x01(\t\x12\x10\n\x08progress\x18\x03 \x01(\x02\x12\x0f\n\x07message\x18\x04 \x01(\t\x12(\n\x06result\x18\x05 \x01(\x0b\x32\x18.analysis.AnalysisResult\"\xe8\x02\n\x0e\x41nalysisResult\x12\x10\n\x08match_id\x18\x01 \x01(\t\x12\x14\n\x0ctotal_frames\x18\x02 \x01(\x05\x12\x17\n\x0fplayers_tracked\x18\x03 \x01(\x05\x12\x1b\n\x13tracking_video_path\x18\x04 \x01(\t\x12\x1a\n\x12tracking_json_path\x18\x05 \x01(\t\x12\x1b\n\x13\x62\x61\x63kline_video_path\x18\x06 \x01(\t\x12\x1a\n\x12heatmap_video_path\x18\x07 \x01(\t\x12 \n\x18possession_analysis_path\x18\x08 \x01(\t\x12\x1c\n\x14\x61nimation_video_path\x18\t \x01(\t\x12\x1f\n\x17processing_time_seconds\x18\n \x01(\x01\x12\x0b\n\x03\x66ps\x18\x0b \x01(\x01\x12\x15\n\rerror_message\x18\x0c \x01(\t\x12\x1e\n\x16tactical_advisory_path\x18\r \x01(\t2Z\n\x0f\x41nalysisService\x12G\n\x0c\x41nalyzeVideo\x12\x19.analysis.AnalysisRequest\x1a\x1a.analysis.AnalysisResponse0\x01\x62\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0e\x61nalysis.proto\x12\x08\x61nalysis\"}\n\x0f\x41nalysisRequest\x12\x12\n\nvideo_path\x18\x01 \x01(\t\x12\x10\n\x08match_id\x18\x02 \x01(\t\x12\x13\n\x0b\x66rame_limit\x18\x03 \x01(\x05\x12\x11\n\tskip_json\x18\x04 \x01(\x08\x12\x1c\n\x14\x63onfidence_threshold\x18\x05 \x01(\x02\"\xa9\x01\n\x10\x41nalysisResponse\x12\x10\n\x08match_id\x18\x01 \x01(\t\x12\x0e\n\x06status\x18\x02 \x01(\t\x12\x10\n\x08progress\x18\x03 \x01(\x02\x12\x0f\n\x07message\x18\x04 \x01(\t\x12&\n\x05\x61lert\x18\x06 \x01(\x0b\x32\x17.analysis.TacticalAlert\x12(\n\x06result\x18\x05 \x01(\x0b\x32\x18.analysis.AnalysisResult\"\xe7\x01\n\rTacticalAlert\x12\x10\n\x08\x61lert_id\x18\x01 \x01(\t\x12\x11\n\ttimestamp\x18\x02 \x01(\t\x12\x16\n\x0eseverity_score\x18\x03 \x01(\x02\x12\x16\n\x0eseverity_label\x18\x04 \x01(\t\x12\x10\n\x08\x63\x61tegory\x18\x05 \x01(\t\x12\x15\n\rdecision_type\x18\x06 \x01(\t\x12\x0e\n\x06status\x18\x07 \x01(\t\x12\x0e\n\x06\x61\x63tion\x18\x08 \x01(\t\x12\x18\n\x10review_countdown\x18\t \x01(\x05\x12\x1e\n\x16\x63\x61tegory_trigger_count\x18\n \x01(\x05\"\xe8\x02\n\x0e\x41nalysisResult\x12\x10\n\x08match_id\x18\x01 \x01(\t\x12\x14\n\x0ctotal_frames\x18\x02 \x01(\x05\x12\x17\n\x0fplayers_tracked\x18\x03 \x01(\x05\x12\x1b\n\x13tracking_video_path\x18\x04 \x01(\t\x12\x1a\n\x12tracking_json_path\x18\x05 \x01(\t\x12\x1b\n\x13\x62\x61\x63kline_video_path\x18\x06 \x01(\t\x12\x1a\n\x12heatmap_video_path\x18\x07 \x01(\t\x12 \n\x18possession_analysis_path\x18\x08 \x01(\t\x12\x1c\n\x14\x61nimation_video_path\x18\t \x01(\t\x12\x1f\n\x17processing_time_seconds\x18\n \x01(\x01\x12\x0b\n\x03\x66ps\x18\x0b \x01(\x01\x12\x15\n\rerror_message\x18\x0c \x01(\t\x12\x1e\n\x16tactical_advisory_path\x18\r \x01(\t2Z\n\x0f\x41nalysisService\x12G\n\x0c\x41nalyzeVideo\x12\x19.analysis.AnalysisRequest\x1a\x1a.analysis.AnalysisResponse0\x01\x62\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -34,9 +34,11 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_ANALYSISREQUEST']._serialized_start=28
   _globals['_ANALYSISREQUEST']._serialized_end=153
   _globals['_ANALYSISRESPONSE']._serialized_start=156
-  _globals['_ANALYSISRESPONSE']._serialized_end=285
-  _globals['_ANALYSISRESULT']._serialized_start=288
-  _globals['_ANALYSISRESULT']._serialized_end=648
-  _globals['_ANALYSISSERVICE']._serialized_start=650
-  _globals['_ANALYSISSERVICE']._serialized_end=740
+  _globals['_ANALYSISRESPONSE']._serialized_end=325
+  _globals['_TACTICALALERT']._serialized_start=328
+  _globals['_TACTICALALERT']._serialized_end=559
+  _globals['_ANALYSISRESULT']._serialized_start=562
+  _globals['_ANALYSISRESULT']._serialized_end=922
+  _globals['_ANALYSISSERVICE']._serialized_start=924
+  _globals['_ANALYSISSERVICE']._serialized_end=1014
 # @@protoc_insertion_point(module_scope)

@@ -14,6 +14,8 @@ from .formation_service import FormationService
 import uuid
 
 class MatchService:
+    _video_anchor_schema_checked = False
+
     def __init__(self, db_connection):
         self.db_connection = db_connection
         self.match_lineup_service = MatchLineupService(db_connection)
@@ -22,6 +24,26 @@ class MatchService:
         self.match_event_service = MatchEventService(db_connection)
         self.player_service = PlayerService(db_connection)
         self.formation_service = FormationService(db_connection)
+        self._ensure_video_anchor_schema()
+
+    def _ensure_video_anchor_schema(self):
+        if MatchService._video_anchor_schema_checked:
+            return
+        with self.db_connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM information_schema.columns
+                WHERE table_schema = DATABASE()
+                  AND table_name = 'matches'
+                  AND column_name = 'video_anchor_seconds'
+                """
+            )
+            exists = cursor.fetchone()
+            if not exists or int(exists["count"]) == 0:
+                cursor.execute("ALTER TABLE matches ADD COLUMN video_anchor_seconds INT NULL")
+                self.db_connection.commit()
+        MatchService._video_anchor_schema_checked = True
 
     def create_match(self, match: MatchCreate, user_team_ids: List[str]) -> Match:
         with self.db_connection.cursor() as cursor:
@@ -32,8 +54,8 @@ class MatchService:
             # For simplicity, we assume if away_team_id is a user's team, it must be in user_team_ids
 
             new_match_id = str(uuid.uuid4())
-            sql = "INSERT INTO matches (id, home_team_id, away_team_id, date_time, venue, event_id, status, home_score, away_score) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)"
-            cursor.execute(sql, (new_match_id, match.home_team_id, match.away_team_id, match.date_time, match.venue, match.event_id, match.status.value if match.status else None, match.home_score, match.away_score))
+            sql = "INSERT INTO matches (id, home_team_id, away_team_id, date_time, venue, event_id, status, home_score, away_score, video_anchor_seconds) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+            cursor.execute(sql, (new_match_id, match.home_team_id, match.away_team_id, match.date_time, match.venue, match.event_id, match.status.value if match.status else None, match.home_score, match.away_score, match.video_anchor_seconds))
             self.db_connection.commit()
 
             return self.get_match(new_match_id, user_team_ids)
@@ -73,6 +95,7 @@ class MatchService:
                     m.status,
                     m.home_score,
                     m.away_score,
+                    m.video_anchor_seconds,
                     ht.name as home_team_name,
                     at.name as away_team_name,
                     e.name as event_name
@@ -162,3 +185,39 @@ class MatchService:
             team_stats=team_stats,
         )
 
+    def set_video_anchor(
+        self,
+        match_id: str,
+        video_anchor_seconds: int,
+        user_team_ids: List[str],
+        overwrite: bool = False,
+    ) -> Optional[int]:
+        match = self.get_match(match_id, user_team_ids)
+        if not match:
+            return None
+
+        with self.db_connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT video_anchor_seconds FROM matches WHERE id = %s LIMIT 1",
+                (match_id,),
+            )
+            row = cursor.fetchone()
+            existing_anchor = row["video_anchor_seconds"] if row else None
+            if existing_anchor is not None and not overwrite:
+                raise ValueError("Anchor already set. Use force=true to overwrite.")
+
+            cursor.execute(
+                "UPDATE matches SET video_anchor_seconds = %s WHERE id = %s",
+                (video_anchor_seconds, match_id),
+            )
+            self.db_connection.commit()
+            return video_anchor_seconds
+
+    def reset_video_anchor(self, match_id: str, user_team_ids: List[str]) -> bool:
+        match = self.get_match(match_id, user_team_ids)
+        if not match:
+            return False
+        with self.db_connection.cursor() as cursor:
+            cursor.execute("UPDATE matches SET video_anchor_seconds = NULL WHERE id = %s", (match_id,))
+            self.db_connection.commit()
+            return True
