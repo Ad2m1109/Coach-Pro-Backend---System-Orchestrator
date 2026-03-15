@@ -282,6 +282,23 @@ CREATE TABLE tactical_alerts (
     FOREIGN KEY (match_id) REFERENCES matches(id) ON DELETE CASCADE
 );
 
+CREATE TABLE analysis_segments (
+    id            CHAR(36) PRIMARY KEY,
+    match_id      CHAR(36) NOT NULL,
+    segment_index INT NOT NULL,
+    start_sec     FLOAT NOT NULL,
+    end_sec       FLOAT NOT NULL,
+    video_start_sec FLOAT NOT NULL,
+    analysis_json JSON,
+    recommendation TEXT,
+    severity_score DECIMAL(5,4) DEFAULT 0.0,
+    severity_label VARCHAR(32) DEFAULT 'LOW',
+    status        ENUM('PENDING','PROCESSING','COMPLETED','FAILED','EMPTY') DEFAULT 'PENDING',
+    created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_match_segment (match_id, segment_index),
+    FOREIGN KEY (match_id) REFERENCES matches(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- UUID Triggers (add after all tables exist)
 DELIMITER //
 CREATE TRIGGER before_users_insert BEFORE INSERT ON users FOR EACH ROW
@@ -359,6 +376,8 @@ BEGIN IF NEW.id IS NULL THEN SET NEW.id = UUID(); END IF; END//
 CREATE TRIGGER before_tactical_insights_insert BEFORE INSERT ON tactical_insights FOR EACH ROW
 BEGIN IF NEW.id IS NULL THEN SET NEW.id = UUID(); END IF; END//
 CREATE TRIGGER before_tactical_alerts_insert BEFORE INSERT ON tactical_alerts FOR EACH ROW
+BEGIN IF NEW.id IS NULL THEN SET NEW.id = UUID(); END IF; END//
+CREATE TRIGGER before_analysis_segments_insert BEFORE INSERT ON analysis_segments FOR EACH ROW
 BEGIN IF NEW.id IS NULL THEN SET NEW.id = UUID(); END IF; END//
 DELIMITER ;
 

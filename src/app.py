@@ -45,6 +45,7 @@ from controllers.note_controller import router as note_router
 from controllers.analysis_controller import router as analysis_router
 from controllers.assistant_controller import router as assistant_router
 from controllers.tactical_alert_controller import router as tactical_alert_router
+from controllers.segment_controller import router as segment_router
 # from controllers.simulation_controller import router as simulation_router
 
 app = FastAPI(
@@ -86,6 +87,7 @@ app.include_router(note_router, prefix="/api", tags=["Notes"])
 app.include_router(analysis_router, prefix="/api", tags=["Analysis"])
 app.include_router(assistant_router, prefix="/api/assistant", tags=["AI Assistant"])
 app.include_router(tactical_alert_router, tags=["Tactical Alerts"])
+app.include_router(segment_router, prefix="/api", tags=["Analysis Segments"])
 
 from fastapi import WebSocket, WebSocketDisconnect
 from controllers.tactical_alert_controller import alert_service

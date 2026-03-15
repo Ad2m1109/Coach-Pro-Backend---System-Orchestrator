@@ -98,8 +98,38 @@ class AnalysisJobService:
         """
         
         async def progress_callback(response):
-            """Update job progress and relay alerts."""
-            if response.status == "ALERT" and hasattr(response, 'alert'):
+            """Update job progress, relay alerts, and persist segments."""
+            if response.status == "SEGMENT_DONE":
+                # Parse the segment JSON from response.message
+                try:
+	                    seg_data = json.loads(response.message)
+	                    from services.segment_service import SegmentService
+	                    from controllers.segment_controller import push_segment_event
+
+	                    saved = SegmentService.insert_segment(
+	                        analysis_id=job_id,
+	                        match_id=match_id,
+	                        segment_index=seg_data.get('segment_index', 0),
+	                        start_sec=seg_data.get('start_sec', 0),
+	                        end_sec=seg_data.get('end_sec', 0),
+	                        video_start_sec=seg_data.get('video_start_sec', 0),
+	                        analysis_json=seg_data.get('analysis'),
+	                        recommendation=seg_data.get('recommendation'),
+	                        severity_score=seg_data.get('severity_score', 0),
+	                        severity_label=seg_data.get('severity_label', 'LOW'),
+	                        status=seg_data.get('status', 'COMPLETED'),
+	                    )
+	                    # Push to live SSE listeners
+	                    seg_payload = dict(seg_data)
+	                    seg_payload.update(saved)
+	                    seg_payload["type"] = "segment"
+	                    seg_payload["status"] = "SEGMENT_DONE"
+	                    await push_segment_event(match_id, seg_payload)
+	                    logger.info(f"Segment {seg_data.get('segment_index')} persisted for match {match_id}")
+                except Exception as seg_err:
+                    logger.error(f"Failed to persist segment: {seg_err}")
+
+            elif response.status == "ALERT" and hasattr(response, 'alert'):
                 extra_event = {}
                 try:
                     if response.message:
@@ -127,7 +157,8 @@ class AnalysisJobService:
                     'category_trigger_count': response.alert.category_trigger_count,
                     'feedback': 'none'
                 })
-            else:
+            elif response.status != "ALERT":
+                # Only update job progress if status is not 'ALERT' (ENUM mismatch)
                 await self._update_job_progress(job_id, response)
         
         try:

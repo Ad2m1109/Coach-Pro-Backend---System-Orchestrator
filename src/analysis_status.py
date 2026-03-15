@@ -1,0 +1,22 @@
+"""Shared analysis status normalization logic."""
+
+ANALYSIS_STATUS_PENDING = "PENDING"
+ANALYSIS_STATUS_PROCESSING = "PROCESSING"
+ANALYSIS_STATUS_COMPLETED = "COMPLETED"
+ANALYSIS_STATUS_FAILED = "FAILED"
+ANALYSIS_STATUS_QUEUED = "QUEUED"
+
+TERMINAL_STATUSES = {ANALYSIS_STATUS_COMPLETED, ANALYSIS_STATUS_FAILED}
+
+
+def normalize_status(status: str) -> str:
+    s = (status or "").strip().upper()
+    if s in {"QUEUED", "PENDING"}:
+        return ANALYSIS_STATUS_QUEUED
+    if s in {"PROCESSING", "STREAMING", "RECEIVING"}:
+        return ANALYSIS_STATUS_PROCESSING
+    if s in {"COMPLETED", "DONE"}:
+        return ANALYSIS_STATUS_COMPLETED
+    if s in {"FAILED", "ERROR"}:
+        return ANALYSIS_STATUS_FAILED
+    return ANALYSIS_STATUS_PROCESSING

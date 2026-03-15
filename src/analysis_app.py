@@ -6,6 +6,7 @@ from typing import Optional, Dict
 import os
 import uuid
 import cv2
+import asyncio
 import numpy as np
 import shutil
 from datetime import datetime
@@ -15,6 +16,16 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi import Request
 from fastapi.responses import StreamingResponse, Response
 import subprocess
+
+from analysis_status import (
+    ANALYSIS_STATUS_PENDING,
+    ANALYSIS_STATUS_PROCESSING,
+    ANALYSIS_STATUS_COMPLETED,
+    ANALYSIS_STATUS_FAILED,
+    ANALYSIS_STATUS_QUEUED,
+    TERMINAL_STATUSES,
+    normalize_status,
+)
 
 from database import get_db, Connection
 from services.user_service import UserService
@@ -112,30 +123,81 @@ app.add_middleware(
 single_image_analyzer = FootballAnalyzer()
 CHUNK_SIZE = 1024 * 1024
 
+# In-memory tasks for cancellation
+_active_analysis_tasks = {}
+
+# Register segment controller for SSE and REST segment endpoints
+from controllers.segment_controller import router as segment_router
+app.include_router(segment_router, prefix="/api", tags=["Analysis Segments"])
+
+
+@app.get('/healthz', tags=['Health'])
+async def health_check():
+    return {
+        "status": "ok",
+        "service": "analysis-backend",
+        "tracking_engine": os.environ.get("TRACKING_ENGINE_HOST", "localhost") + ":" + str(os.environ.get("TRACKING_ENGINE_PORT", 50051)),
+    }
+
+
+def _ensure_analysis_run_columns(db: Connection):
+    """Add optional columns for resilient retry semantics.
+    This runs once and ignores errors if columns exist.
+    """
+    with db.cursor() as cursor:
+        try:
+            cursor.execute("ALTER TABLE analysis_runs ADD COLUMN input_video_path TEXT NULL")
+            db.commit()
+        except Exception:
+            db.rollback()
+        try:
+            cursor.execute("ALTER TABLE analysis_runs ADD COLUMN frame_limit INT NULL")
+            db.commit()
+        except Exception:
+            db.rollback()
+        try:
+            cursor.execute("ALTER TABLE analysis_runs ADD COLUMN skip_json BOOLEAN NULL")
+            db.commit()
+        except Exception:
+            db.rollback()
+        try:
+            cursor.execute("ALTER TABLE analysis_runs ADD COLUMN is_cancelled BOOLEAN DEFAULT FALSE")
+            db.commit()
+        except Exception:
+            db.rollback()
+
 
 def _create_analysis_run(
     run_id: str,
     match_id: str,
     input_video_name: str,
+    input_video_path: str,
     generated_by: str,
+    frame_limit: int = 0,
+    skip_json: bool = False,
 ):
     db_gen = get_db()
     db = next(db_gen)
     try:
+        _ensure_analysis_run_columns(db)
         with db.cursor() as cursor:
             cursor.execute(
                 """
                 INSERT INTO analysis_runs
-                    (id, match_id, input_video_name, status, progress, message, generated_by)
+                    (id, match_id, input_video_name, input_video_path, status, progress, message, generated_by, frame_limit, skip_json)
                 VALUES
-                    (%s, %s, %s, 'PENDING', 0.0, %s, %s)
+                    (%s, %s, %s, %s, %s, 0.0, %s, %s, %s, %s)
                 """,
                 (
                     run_id,
                     match_id,
                     input_video_name,
+                    input_video_path,
+                    ANALYSIS_STATUS_PENDING,
                     "Upload complete. Queued for tracking analysis.",
                     generated_by,
+                    frame_limit,
+                    skip_json,
                 ),
             )
             db.commit()
@@ -144,6 +206,58 @@ def _create_analysis_run(
             next(db_gen)
         except StopIteration:
             pass
+
+
+def _mark_stale_analysis_runs(db: Connection, max_age_seconds: int = 60 * 60 * 2):
+    stale_threshold_sql = "DATE_SUB(NOW(), INTERVAL %s SECOND)"
+    with db.cursor() as cursor:
+        cursor.execute(
+            f"""
+            UPDATE analysis_runs
+            SET status = %s,
+                message = %s,
+                completed_at = NOW(),
+                progress = 0.0
+            WHERE status = %s
+              AND submitted_at < {stale_threshold_sql}
+              AND (is_cancelled IS NULL OR is_cancelled = FALSE)
+            """,
+            (
+                ANALYSIS_STATUS_FAILED,
+                "Marked failed due to stale processing timeout.",
+                ANALYSIS_STATUS_PROCESSING,
+                max_age_seconds,
+            ),
+        )
+        db.commit()
+
+
+def _cleanup_analysis_outputs(run_id: str):
+    possible_keys = [
+        f"outputs/{run_id}tracking.mp4",
+        f"outputs/{run_id}tracking.json",
+        f"outputs/analytics/{run_id}backline.mp4",
+        f"outputs/heatmaps/{run_id}heatmap.mp4",
+        f"outputs/analytics/{run_id}animation.mp4",
+        f"outputs/analytics/{run_id}possession.json",
+        f"outputs/analytics/{run_id}advisory.json",
+    ]
+    for rel in possible_keys:
+        p = ANALYSIS_OUTPUT_ROOT / rel
+        if p.exists():
+            try:
+                p.unlink()
+            except Exception:
+                pass
+
+
+def _resolve_analysis_run(run_id: str, db: Connection):
+    with db.cursor() as cursor:
+        cursor.execute(
+            "SELECT * FROM analysis_runs WHERE id = %s LIMIT 1",
+            (run_id,),
+        )
+        return cursor.fetchone()
 
 
 def _update_analysis_run(
@@ -155,6 +269,7 @@ def _update_analysis_run(
 ):
     db_gen = get_db()
     db = next(db_gen)
+    normalized_status = normalize_status(status)
     try:
         with db.cursor() as cursor:
             if completed:
@@ -167,7 +282,7 @@ def _update_analysis_run(
                         completed_at = NOW()
                     WHERE id = %s
                     """,
-                    (status, progress, message, run_id),
+                    (normalized_status, progress, message, run_id),
                 )
             else:
                 cursor.execute(
@@ -178,7 +293,7 @@ def _update_analysis_run(
                         message = %s
                     WHERE id = %s
                     """,
-                    (status, progress, message, run_id),
+                    (normalized_status, progress, message, run_id),
                 )
             db.commit()
     finally:
@@ -197,15 +312,49 @@ async def run_tracking_analysis_job(
     """Run tracking pipeline through Tracking Engine and persist status in DB."""
     client = TrackingEngineClient()
     try:
-        _update_analysis_run(job_id, "PROCESSING", 0.05, "Submitting video to tracking engine...")
+        _update_analysis_run(job_id, ANALYSIS_STATUS_PROCESSING, 0.05, "Submitting video to tracking engine...")
 
         async def progress_callback(response):
-            _update_analysis_run(
-                job_id,
-                response.status,
-                float(response.progress),
-                response.message,
-            )
+            if response.status == "SEGMENT_DONE":
+                try:
+                    seg_data = json.loads(response.message)
+                    from services.segment_service import SegmentService
+                    from controllers.segment_controller import push_analysis_segment_event
+
+                    saved = SegmentService.insert_segment(
+                        analysis_id=job_id,
+                        match_id=match_id,
+                        segment_index=seg_data.get("segment_index", 0),
+                        start_sec=seg_data.get("start_sec", 0),
+                        end_sec=seg_data.get("end_sec", 0),
+                        video_start_sec=seg_data.get("video_start_sec", 0),
+                        analysis_json=seg_data.get("analysis"),
+                        recommendation=seg_data.get("recommendation"),
+                        severity_score=seg_data.get("severity_score", 0),
+                        severity_label=seg_data.get("severity_label", "LOW"),
+                        status=seg_data.get("status", "COMPLETED"),
+                    )
+                    seg_payload = dict(seg_data)
+                    seg_payload.update(saved)
+                    seg_payload["type"] = "segment"
+                    seg_payload["status"] = "SEGMENT_DONE"
+                    await push_analysis_segment_event(job_id, seg_payload)
+                except Exception as seg_err:
+                    import logging
+
+                    logging.getLogger(__name__).error(f"Failed to persist segment: {seg_err}")
+            elif response.status == "ALERT":
+                # Only stream tactical alerts; keep run status unchanged.
+                pass
+            else:
+                mapped_status = normalize_status(response.status)
+                _update_analysis_run(
+                    job_id,
+                    mapped_status,
+                    float(response.progress),
+                    response.message,
+                    completed=(mapped_status in TERMINAL_STATUSES),
+                )
 
         result = await client.analyze_video(
             video_path=video_path,
@@ -236,36 +385,130 @@ async def run_tracking_analysis_job(
             if preview_relative:
                 outputs[f"{key.replace('_path', '')}_preview_path"] = preview_relative
 
+        final_status = normalize_status(result.get("status", ANALYSIS_STATUS_COMPLETED))
         _update_analysis_run(
             job_id,
-            result.get("status", "COMPLETED"),
+            final_status,
             float(result.get("progress", 1.0)),
             result.get("message", "Analysis complete"),
-            completed=True,
+            completed=(final_status in TERMINAL_STATUSES),
         )
+        try:
+            from controllers.segment_controller import push_analysis_segment_event
+
+            await push_analysis_segment_event(job_id, {"type": "done", "status": final_status})
+        except Exception:
+            pass
     except Exception as e:
         _update_analysis_run(
             job_id,
-            "FAILED",
+            ANALYSIS_STATUS_FAILED,
             0.0,
             str(e),
             completed=True,
         )
+        try:
+            from controllers.segment_controller import push_analysis_segment_event
+
+            await push_analysis_segment_event(job_id, {"type": "done", "status": ANALYSIS_STATUS_FAILED})
+        except Exception:
+            pass
     finally:
         try:
             await client.close()
         except Exception:
             pass
-        if os.path.exists(video_path):
-            try:
-                os.remove(video_path)
-            except Exception:
-                pass
+        # Keep source file for reuse/retry; cleanup occurs on cancel or manual maintenance.
+        pass
+
+
+@app.post("/api/analysis/stale-detection", tags=["Analysis"])
+async def stale_detection(db: Connection = Depends(get_db), current_user: User = Depends(get_current_user)):
+    _mark_stale_analysis_runs(db)
+    return {"status": "ok", "message": "Stale processing runs marked failed."}
+
+
+@app.post("/api/analysis/{analysis_id}/cancel", tags=["Analysis"])
+async def cancel_analysis_run(analysis_id: str, db: Connection = Depends(get_db), current_user: User = Depends(get_current_user)):
+    run = _resolve_analysis_run(analysis_id, db)
+    if not run:
+        raise HTTPException(status_code=404, detail="Analysis run not found")
+    if run.get("generated_by") != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    status = normalize_status(run.get("status", ""))
+    if status in TERMINAL_STATUSES:
+        raise HTTPException(status_code=400, detail="Cannot cancel a completed or failed run")
+
+    task = _active_analysis_tasks.get(analysis_id)
+    if task and not task.done():
+        task.cancel()
+
+    with db.cursor() as cursor:
+        cursor.execute(
+            "UPDATE analysis_runs SET status = %s, message = %s, completed_at = NOW(), progress = 0.0, is_cancelled = TRUE WHERE id = %s",
+            (ANALYSIS_STATUS_FAILED, "Analysis cancelled by user.", analysis_id),
+        )
+        db.commit()
+
+    _cleanup_analysis_outputs(analysis_id)
+    input_video_path = run.get("input_video_path")
+    if input_video_path:
+        try:
+            os.remove(input_video_path)
+        except Exception:
+            pass
+    return {"status": "cancelled", "analysis_id": analysis_id}
+
+
+@app.post("/api/analysis/{analysis_id}/retry", tags=["Analysis"])
+async def retry_analysis_run(
+    analysis_id: str,
+    db: Connection = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    run = _resolve_analysis_run(analysis_id, db)
+    if not run:
+        raise HTTPException(status_code=404, detail="Analysis run not found")
+    if run.get("generated_by") != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    input_video_path = run.get("input_video_path")
+    if not input_video_path or not os.path.exists(input_video_path):
+        raise HTTPException(status_code=400, detail="Original video not available for retry")
+
+    new_id = str(uuid.uuid4())
+    effective_match_id = run.get("match_id") or str(uuid.uuid4())
+    frame_limit = run.get("frame_limit") or 0
+    skip_json = bool(run.get("skip_json"))
+
+    _create_analysis_run(
+        run_id=new_id,
+        match_id=effective_match_id,
+        input_video_name=run.get("input_video_name") or "video.mp4",
+        input_video_path=input_video_path,
+        generated_by=current_user.id,
+        frame_limit=frame_limit,
+        skip_json=skip_json,
+    )
+
+    async def _retry_wrapper():
+        task = asyncio.current_task()
+        if task:
+            _active_analysis_tasks[new_id] = task
+        try:
+            await run_tracking_analysis_job(new_id, input_video_path, effective_match_id, frame_limit, skip_json)
+        finally:
+            _active_analysis_tasks.pop(new_id, None)
+
+    asyncio.create_task(_retry_wrapper())
+    return {"status": "retry_started", "analysis_id": new_id, "original_id": analysis_id}
 
 
 @app.get("/api/analysis_status/{analysis_id}", tags=["Analysis"])
 async def get_analysis_status(analysis_id: str, db: Connection = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Check the status of a video analysis task from DB."""
+    _mark_stale_analysis_runs(db)
     with db.cursor() as cursor:
         cursor.execute(
             """
@@ -297,6 +540,7 @@ async def get_analysis_status(analysis_id: str, db: Connection = Depends(get_db)
 @app.get("/api/analysis_history", tags=["Analysis"])
 async def get_analysis_history(db: Connection = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Return tracking analysis history for Analyze > History page."""
+    _mark_stale_analysis_runs(db)
     with db.cursor() as cursor:
         cursor.execute(
             """
@@ -603,17 +847,28 @@ async def analyze_match_video(
             run_id=analysis_id,
             match_id=effective_match_id,
             input_video_name=safe_name,
+            input_video_path=file_path,
             generated_by=current_user.id,
+            frame_limit=frame_limit,
+            skip_json=skip_json,
         )
 
-        background_tasks.add_task(
-            run_tracking_analysis_job,
-            analysis_id,
-            file_path,
-            effective_match_id,
-            frame_limit,
-            skip_json,
-        )
+        async def _run_job_wrapper():
+            task = asyncio.current_task()
+            if task:
+                _active_analysis_tasks[analysis_id] = task
+            try:
+                await run_tracking_analysis_job(
+                    analysis_id,
+                    file_path,
+                    effective_match_id,
+                    frame_limit,
+                    skip_json,
+                )
+            finally:
+                _active_analysis_tasks.pop(analysis_id, None)
+
+        asyncio.create_task(_run_job_wrapper())
 
         return {
             "status": "accepted",
