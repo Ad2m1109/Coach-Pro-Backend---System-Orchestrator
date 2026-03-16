@@ -2,8 +2,13 @@
 Global Configuration for the Football Coach Backend
 """
 
-# Remote LLM (Colab-hosted Mistral 7B)
-REMOTE_LLM_URL = "https://5c6d-136-110-63-203.ngrok-free.app/generate"
-# Mode: "remote" or "local" (for future local fallback)
-LLM_MODE = "remote"
-LLM_TIMEOUT = 60  # seconds
+import os
+
+# LLM configuration
+# Prefer environment variables so production doesn't rely on hardcoded ngrok URLs.
+REMOTE_LLM_URL = os.environ.get(
+    "REMOTE_LLM_URL",
+    "https://5c6d-136-110-63-203.ngrok-free.app/generate",
+)
+LLM_MODE = os.environ.get("LLM_MODE", "remote")  # "remote" or "local"
+LLM_TIMEOUT = int(os.environ.get("LLM_TIMEOUT", "60"))  # seconds

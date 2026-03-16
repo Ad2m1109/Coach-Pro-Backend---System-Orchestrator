@@ -48,12 +48,10 @@ if not ANALYSIS_OUTPUT_ROOT.exists():
         ANALYSIS_OUTPUT_ROOT = LEGACY_INTERNAL_DEMO_ROOT.resolve()
     elif LEGACY_EXTERNAL_DEMO_ROOT.exists():
         ANALYSIS_OUTPUT_ROOT = LEGACY_EXTERNAL_DEMO_ROOT.resolve()
-PUBLIC_KEY_PATH = os.path.join(PROJECT_ROOT, "certs", "public.pem")
-if not os.path.exists(PUBLIC_KEY_PATH):
-    PUBLIC_KEY_PATH = "certs/public.pem" # local fallback
 
-with open(PUBLIC_KEY_PATH, "r") as f:
-    RSA_PUBLIC_KEY = f.read()
+from security.jwt_keys import get_jwt_public_key
+
+RSA_PUBLIC_KEY = get_jwt_public_key()
 
 ALGORITHM = "RS256"
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/token")
@@ -102,6 +100,32 @@ async def get_current_user_from_query_token(
         raise credentials_exception
     return user
 
+def _extract_bearer_token_from_header(request: Request) -> str:
+    auth = request.headers.get("authorization") or ""
+    if not auth:
+        return ""
+    parts = auth.split(" ", 1)
+    if len(parts) != 2:
+        return ""
+    if parts[0].lower() != "bearer":
+        return ""
+    return parts[1].strip()
+
+
+async def get_current_user_flexible(
+    request: Request,
+    access_token: str,
+    db: Connection,
+) -> User:
+    """
+    Prefer Authorization header; fall back to access_token query param.
+    This helps avoid leaking tokens in URLs (logs/history/proxies).
+    """
+    token = _extract_bearer_token_from_header(request) or (access_token or "")
+    if not token:
+        raise HTTPException(status_code=401, detail="Missing token")
+    return await get_current_user_from_query_token(token, db)
+
 async def get_current_active_user(current_user: User = Depends(get_current_user)):
     return current_user
 
@@ -111,10 +135,17 @@ app = FastAPI(
     version="1.0.0",
 )
 
+cors_origins_raw = os.environ.get("CORS_ALLOW_ORIGINS", "").strip()
+cors_origins = (
+    [o.strip() for o in cors_origins_raw.split(",") if o.strip()]
+    if cors_origins_raw
+    else ["*"]
+)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=cors_origins,
+    # If origins is '*', credentials must be disabled (browsers reject '*' + credentials).
+    allow_credentials=False if cors_origins == ["*"] else True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -718,14 +749,13 @@ def _stream_file_range(file_path: Path, start: int, end: int):
 
 @app.get("/api/analysis/files", tags=["Analysis"])
 async def get_analysis_file(
+    request: Request,
     path: str,
     access_token: str = "",
     db: Connection = Depends(get_db),
     current_user: Optional[User] = None,
 ):
-    if not access_token:
-        raise HTTPException(status_code=401, detail="Missing token")
-    current_user = await get_current_user_from_query_token(access_token, db)
+    current_user = await get_current_user_flexible(request, access_token, db)
     file_path = _resolve_output_path(path)
     return FileResponse(file_path)
 
@@ -739,9 +769,7 @@ async def stream_analysis_file(
     current_user: Optional[User] = None,
 ):
     """Range-enabled streaming endpoint for video playback."""
-    if not access_token:
-        raise HTTPException(status_code=401, detail="Missing token")
-    current_user = await get_current_user_from_query_token(access_token, db)
+    current_user = await get_current_user_flexible(request, access_token, db)
     file_path = _resolve_output_path(path)
     file_size = file_path.stat().st_size
     range_header = request.headers.get("range")
@@ -785,14 +813,13 @@ async def stream_analysis_file(
 
 @app.get("/api/analysis/files/json", tags=["Analysis"])
 async def get_analysis_json(
+    request: Request,
     path: str,
     access_token: str = "",
     db: Connection = Depends(get_db),
     current_user: Optional[User] = None,
 ):
-    if not access_token:
-        raise HTTPException(status_code=401, detail="Missing token")
-    current_user = await get_current_user_from_query_token(access_token, db)
+    current_user = await get_current_user_flexible(request, access_token, db)
     file_path = _resolve_output_path(path)
     if file_path.suffix.lower() != ".json":
         raise HTTPException(status_code=400, detail="Only JSON files are supported")

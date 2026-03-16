@@ -9,21 +9,11 @@ from database import get_db, Connection
 from services.user_service import UserService
 from models.user import User
 from rbac import APP_ROLE_ACCOUNT_MANAGER
+from security.jwt_keys import get_jwt_private_key, get_jwt_public_key
 
 # --- Configuration for JWT (RS256) --- #
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-PRIVATE_KEY_PATH = os.path.join(PROJECT_ROOT, "certs", "private.pem")
-PUBLIC_KEY_PATH = os.path.join(PROJECT_ROOT, "certs", "public.pem")
-if not os.path.exists(PRIVATE_KEY_PATH):
-    # Fallback for local dev if PROJECT_ROOT logic fails in some shell envs
-    PRIVATE_KEY_PATH = "certs/private.pem"
-    PUBLIC_KEY_PATH = "certs/public.pem"
-
-with open(PRIVATE_KEY_PATH, "r") as f:
-    RSA_PRIVATE_KEY = f.read()
-
-with open(PUBLIC_KEY_PATH, "r") as f:
-    RSA_PUBLIC_KEY = f.read()
+RSA_PRIVATE_KEY = get_jwt_private_key()
+RSA_PUBLIC_KEY = get_jwt_public_key()
 
 ALGORITHM = "RS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
@@ -79,6 +69,10 @@ async def get_current_active_user(
         "/api/users",
         "/api/staff",
         "/api/teams",
+        "/api/players",
+        "/api/matches",
+        "/api/reunions",
+        "/api/training_sessions",
     )
     owner_allowed_extra_write_prefixes = (
         "/api/decision/",

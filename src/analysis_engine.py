@@ -2,9 +2,12 @@ import cv2
 import numpy as np
 import os
 import json
+import logging
 from typing import List, Dict, Any
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+logger = logging.getLogger(__name__)
 
 class FootballAnalyzer:
     """Light wrapper for single-image analysis.
@@ -15,7 +18,7 @@ class FootballAnalyzer:
         if not model_path:
             model_path = os.path.join(PROJECT_ROOT, "..", "Analysis", "yolov8m.onnx")
             
-        print(f"Initializing analyzer (python wrapper) with model: {model_path}")
+        logger.info("Initializing analyzer (python wrapper) with model: %s", model_path)
         self.model_path = model_path
 
     def analyze_single_image(self, image):

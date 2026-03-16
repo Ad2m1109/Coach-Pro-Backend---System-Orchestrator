@@ -3,6 +3,9 @@ from pymysql.cursors import DictCursor
 from pymysql.connections import Connection
 
 import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Database configuration (use environment variables; defaults target XAMPP local setup)
 DB_CONFIG = {
@@ -22,7 +25,7 @@ def get_db():
         conn = pymysql.connect(**DB_CONFIG)
         yield conn
     except pymysql.Error as e:
-        print(f"Error connecting to database: {e}")
+        logger.exception("Error connecting to database")
         raise
     finally:
         if conn:

@@ -59,10 +59,17 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # --- CORS Middleware ---
 # Allow requests from frontend (adjust origins as needed)
+cors_origins_raw = os.environ.get("CORS_ALLOW_ORIGINS", "").strip()
+cors_origins = (
+    [o.strip() for o in cors_origins_raw.split(",") if o.strip()]
+    if cors_origins_raw
+    else ["*"]
+)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins for local development
-    allow_credentials=True,
+    allow_origins=cors_origins,
+    # If origins is '*', credentials must be disabled (browsers reject '*' + credentials).
+    allow_credentials=False if cors_origins == ["*"] else True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
