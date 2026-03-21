@@ -159,7 +159,9 @@ _active_analysis_tasks = {}
 
 # Register segment controller for SSE and REST segment endpoints
 from controllers.segment_controller import router as segment_router
+from controllers.tracking_profile_controller import router as tracking_profile_router
 app.include_router(segment_router, prefix="/api", tags=["Analysis Segments"])
+app.include_router(tracking_profile_router, prefix="/api", tags=["Tracking Profiles"])
 
 
 @app.get('/healthz', tags=['Health'])
@@ -339,6 +341,9 @@ async def run_tracking_analysis_job(
     match_id: str,
     frame_limit: int,
     skip_json: bool,
+    confidence_threshold: float = 0.5,
+    ball_confidence: float = 0.3,
+    max_lost_frames: int = 15,
 ):
     """Run tracking pipeline through Tracking Engine and persist status in DB."""
     client = TrackingEngineClient()
@@ -387,11 +392,33 @@ async def run_tracking_analysis_job(
                     completed=(mapped_status in TERMINAL_STATUSES),
                 )
 
+        # Fetch active tracking profile for this match
+        from services.tracking_profile_service import TrackingProfileService
+        profiles = TrackingProfileService.get_profiles_for_match(match_id)
+        active_profile = None
+        for p in profiles:
+            if p.get("is_active"):
+                active_profile = p
+                break
+        
+        calibration_json = None
+        roi_json = None
+        if active_profile and active_profile.get("cameras"):
+            # For Phase 1: Single camera mapping
+            cam = active_profile["cameras"][0]
+            calibration_json = json.dumps(cam.get("calibration", []))
+            roi_json = json.dumps(cam.get("roi", []))
+
         result = await client.analyze_video(
             video_path=video_path,
-            match_id=job_id,
+            match_id=match_id,
             frame_limit=frame_limit,
             skip_json=skip_json,
+            confidence_threshold=confidence_threshold,
+            calibration_json=calibration_json,
+            roi_json=roi_json,
+            ball_confidence=ball_confidence,
+            max_lost_frames=max_lost_frames,
             progress_callback=progress_callback,
         )
 
@@ -854,6 +881,9 @@ async def analyze_match_video(
     match_id: Optional[str] = Form(None),
     frame_limit: int = Form(0),
     skip_json: bool = Form(False),
+    confidence_threshold: float = Form(0.5),
+    ball_confidence: float = Form(0.3),
+    max_lost_frames: int = Form(15),
     current_user: User = Depends(get_current_user),
 ):
     """
@@ -891,6 +921,9 @@ async def analyze_match_video(
                     effective_match_id,
                     frame_limit,
                     skip_json,
+                    confidence_threshold=confidence_threshold,
+                    ball_confidence=ball_confidence,
+                    max_lost_frames=max_lost_frames,
                 )
             finally:
                 _active_analysis_tasks.pop(analysis_id, None)

@@ -47,6 +47,10 @@ class TrackingEngineClient:
         frame_limit: int = 0,
         skip_json: bool = False,
         confidence_threshold: float = 0.5,
+        calibration_json: Optional[str] = None,
+        roi_json: Optional[str] = None,
+        ball_confidence: float = 0.3,
+        max_lost_frames: int = 15,
         progress_callback: Optional[Callable] = None
     ) -> dict:
         """
@@ -58,20 +62,28 @@ class TrackingEngineClient:
             frame_limit: Max frames to process (0 = all)
             skip_json: Skip JSON export if True
             confidence_threshold: YOLO confidence threshold
+            calibration_json: Optional manual calibration (JSON string)
+            roi_json: Optional ROI masking (JSON string)
+            ball_confidence: Specific ball detection threshold
+            max_lost_frames: ByteTracker max_lost
             progress_callback: Optional callback for progress updates
             
         Returns:
             dict with final analysis results
         """
         if not self.stub:
-            self.connect()
+            await self.connect()
         
         request = AnalysisRequest(
             video_path=video_path,
             match_id=match_id,
             frame_limit=frame_limit,
             skip_json=skip_json,
-            confidence_threshold=confidence_threshold
+            confidence_threshold=confidence_threshold,
+            calibration_json=calibration_json or "",
+            roi_json=roi_json or "",
+            ball_confidence=ball_confidence,
+            max_lost_frames=max_lost_frames,
         )
         
         logger.info(f"Submitting analysis request for match {match_id}: {video_path}")

@@ -13,7 +13,11 @@ message AnalysisRequest {
   string match_id = 2;             // Unique match identifier
   int32 frame_limit = 3;           // Max frames to process (0 = all)
   bool skip_json = 4;              // Skip JSON export if true
-  float confidence_threshold = 5;  // YOLO confidence threshold
+  float confidence_threshold = 5;  // YOLO general confidence threshold
+  string calibration_json = 6;     // Optional manual calibration (JSON string)
+  string roi_json = 7;             // Optional ROI masking (JSON string)
+  float ball_confidence = 8;       // Specific ball detection threshold
+  int32 max_lost_frames = 9;       // ByteTracker max_lost
 }
 
 // Streaming response with progress and final results
