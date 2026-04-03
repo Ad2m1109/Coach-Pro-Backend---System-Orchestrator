@@ -18,6 +18,7 @@ message AnalysisRequest {
   string roi_json = 7;             // Optional ROI masking (JSON string)
   float ball_confidence = 8;       // Specific ball detection threshold
   int32 max_lost_frames = 9;       // ByteTracker max_lost
+  bool enable_reid = 10;           // Enable deep learning Re-ID (BoT-SORT / OsNet)
 }
 
 // Streaming response with progress and final results

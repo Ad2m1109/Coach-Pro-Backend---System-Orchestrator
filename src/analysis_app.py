@@ -344,6 +344,7 @@ async def run_tracking_analysis_job(
     confidence_threshold: float = 0.5,
     ball_confidence: float = 0.3,
     max_lost_frames: int = 15,
+    enable_reid: bool = False,
 ):
     """Run tracking pipeline through Tracking Engine and persist status in DB."""
     client = TrackingEngineClient()
@@ -419,6 +420,7 @@ async def run_tracking_analysis_job(
             roi_json=roi_json,
             ball_confidence=ball_confidence,
             max_lost_frames=max_lost_frames,
+            enable_reid=enable_reid,
             progress_callback=progress_callback,
         )
 
@@ -884,6 +886,7 @@ async def analyze_match_video(
     confidence_threshold: float = Form(0.5),
     ball_confidence: float = Form(0.3),
     max_lost_frames: int = Form(15),
+    enable_reid: bool = Form(False),
     current_user: User = Depends(get_current_user),
 ):
     """
@@ -924,6 +927,7 @@ async def analyze_match_video(
                     confidence_threshold=confidence_threshold,
                     ball_confidence=ball_confidence,
                     max_lost_frames=max_lost_frames,
+                    enable_reid=enable_reid,
                 )
             finally:
                 _active_analysis_tasks.pop(analysis_id, None)

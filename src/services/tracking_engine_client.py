@@ -51,6 +51,7 @@ class TrackingEngineClient:
         roi_json: Optional[str] = None,
         ball_confidence: float = 0.3,
         max_lost_frames: int = 15,
+        enable_reid: bool = False,
         progress_callback: Optional[Callable] = None
     ) -> dict:
         """
@@ -66,6 +67,7 @@ class TrackingEngineClient:
             roi_json: Optional ROI masking (JSON string)
             ball_confidence: Specific ball detection threshold
             max_lost_frames: ByteTracker max_lost
+            enable_reid: Enable deep Re-ID model
             progress_callback: Optional callback for progress updates
             
         Returns:
@@ -84,6 +86,7 @@ class TrackingEngineClient:
             roi_json=roi_json or "",
             ball_confidence=ball_confidence,
             max_lost_frames=max_lost_frames,
+            enable_reid=enable_reid,
         )
         
         logger.info(f"Submitting analysis request for match {match_id}: {video_path}")
