@@ -6,6 +6,7 @@ from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
+import httpx
 
 from database import get_db, Connection
 from services.user_service import UserService
@@ -13,6 +14,8 @@ from models.user import User, UserCreate
 from rbac import derive_app_role, permissions_for_role
 
 import os
+from google.oauth2 import id_token
+from google.auth.transport import requests
 
 from dependencies import (
     create_access_token, 
@@ -111,28 +114,8 @@ async def tactical_alerts_websocket(websocket: WebSocket, match_id: str):
     except Exception:
         alert_service.disconnect(match_id, websocket)
 
-@app.post("/api/token", tags=["Authentication"])
-async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Connection = Depends(get_db)):
-    user_service = UserService(db)
-    user = user_service.get_user_by_email(email=form_data.username)
-
-    # Case 1: User not found
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, # Or 404, but 401 is better for security
-            detail="This account does not exist.",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    
-    # Case 2: Incorrect password
-    if not user_service.verify_password(form_data.password, str(user.password_hash)):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect password.",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    # Case 3: Success - Build token claims based on user type
+def generate_user_token_data(user, db: Connection):
+    from rbac import derive_app_role, permissions_for_role
     token_data = {
         "sub": user.email,
         "user_type": user.user_type,
@@ -152,21 +135,166 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
         staff = staff_service.get_staff_by_user_id(user.id)
         
         if not staff:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Staff record not found",
-            )
-        
-        app_role = derive_app_role(user.user_type, staff.role)
-        token_data.update({
-            "staff_id": staff.id,
-            "team_id": staff.team_id,
-            "permission_level": staff.permission_level,
-            "role": staff.role,
-            "app_role": app_role,
-            "app_permissions": permissions_for_role(app_role),
-        })
+            app_role = derive_app_role(user.user_type, None)
+            token_data.update({
+                "app_role": app_role,
+                "app_permissions": permissions_for_role(app_role),
+            })
+        else:
+            app_role = derive_app_role(user.user_type, staff.role)
+            token_data.update({
+                "staff_id": staff.id,
+                "team_id": staff.team_id,
+                "permission_level": staff.permission_level,
+                "role": staff.role,
+                "app_role": app_role,
+                "app_permissions": permissions_for_role(app_role),
+            })
+    return token_data
 
+@app.post("/api/token", tags=["Authentication"])
+async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Connection = Depends(get_db)):
+    user_service = UserService(db)
+    user = user_service.get_user_by_email(email=form_data.username)
+
+    # Case 1: User not found
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="This account does not exist.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    # Case 2: Incorrect password
+    if not user_service.verify_password(form_data.password, str(user.password_hash)):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect password.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    # Case 3: Success
+    token_data = generate_user_token_data(user, db)
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data=token_data, 
+        expires_delta=access_token_expires
+    )
+    return {"access_token": access_token, "token_type": "bearer"}
+
+from pydantic import BaseModel
+class GoogleAuthRequest(BaseModel):
+    id_token: Optional[str] = None
+    access_token: Optional[str] = None
+
+
+async def _fetch_google_userinfo_from_access_token(access_token: str) -> Dict[str, Any]:
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(
+                "https://openidconnect.googleapis.com/v1/userinfo",
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+    except httpx.TimeoutException as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="Google userinfo request timed out",
+        ) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="Google userinfo request failed",
+        ) from exc
+
+    if response.status_code in {400, 401, 403}:
+        raise HTTPException(status_code=401, detail="Invalid Google access token")
+    if response.status_code >= 500:
+        raise HTTPException(
+            status_code=502,
+            detail="Google userinfo service unavailable",
+        )
+    if response.status_code >= 300:
+        raise HTTPException(status_code=401, detail="Invalid Google access token")
+
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="Invalid Google userinfo response",
+        ) from exc
+
+    if not payload.get("sub") or not payload.get("email"):
+        raise HTTPException(status_code=401, detail="Invalid Google access token")
+
+    email_verified = payload.get("email_verified")
+    if email_verified not in (True, "true", "True", 1, "1"):
+        raise HTTPException(
+            status_code=401,
+            detail="Google account email is not verified",
+        )
+
+    return payload
+
+@app.post("/api/auth/google", tags=["Authentication"])
+async def google_auth(auth_req: GoogleAuthRequest, db: Connection = Depends(get_db)):
+    user_service = UserService(db)
+    if auth_req.access_token:
+        id_info = await _fetch_google_userinfo_from_access_token(auth_req.access_token)
+        email = id_info["email"]
+        full_name = id_info.get("name")
+    elif auth_req.id_token:
+        allowed_google_client_ids = [
+            value.strip()
+            for value in {
+                os.environ.get("GOOGLE_SERVER_CLIENT_ID", ""),
+                os.environ.get("GOOGLE_WEB_CLIENT_ID", ""),
+                os.environ.get("GOOGLE_CLIENT_ID", ""),
+            }
+            if value and value.strip()
+        ]
+
+        if not allowed_google_client_ids:
+            raise HTTPException(
+                status_code=500,
+                detail="Google client ID not configured on server",
+            )
+
+        try:
+            id_info = id_token.verify_oauth2_token(
+                auth_req.id_token,
+                requests.Request(),
+                audience=None,
+            )
+            audience = id_info.get("aud")
+            if audience not in allowed_google_client_ids:
+                raise ValueError("Invalid Google token audience")
+
+            email = id_info["email"]
+            full_name = id_info.get("name")
+        except ValueError:
+            raise HTTPException(status_code=401, detail="Invalid Google token")
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="Google authentication requires access_token or id_token",
+        )
+
+    # Check if user exists
+    user = user_service.get_user_by_email(email=email)
+    
+    if not user:
+        from models.user import UserCreate
+        user_create = UserCreate(
+            email=email,
+            full_name=full_name,
+            user_type="owner",
+            is_active=True
+        )
+        user = user_service.create_user(user_create)
+
+    # Generate our JWT
+    token_data = generate_user_token_data(user, db)
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
         data=token_data, 
@@ -188,10 +316,10 @@ async def register_user(user_create: UserCreate, db: Connection = Depends(get_db
     
     new_user = user_service.create_user(user_create)
 
-    # Generate access token for immediate login
+    token_data = generate_user_token_data(new_user, db)
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
-        data={"sub": new_user.email}, expires_delta=access_token_expires
+        data=token_data, expires_delta=access_token_expires
     )
     return {"access_token": access_token, "token_type": "bearer"}
 

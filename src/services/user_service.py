@@ -15,10 +15,23 @@ class UserService:
         return pwd_context.verify(plain_password, hashed_password)
 
     def create_user(self, user: UserCreate) -> User:
-        hashed_password = self.get_password_hash(user.password)
+        if user.password:
+            hashed_password = self.get_password_hash(user.password)
+        else:
+            import secrets
+            hashed_password = self.get_password_hash(secrets.token_urlsafe(32))
+
+        user_type = user.user_type.value if hasattr(user.user_type, "value") else str(user.user_type)
+            
         with self.db_connection.cursor() as cursor:
-            sql = "INSERT INTO users (id, email, password_hash, full_name, is_active) VALUES (UUID(), %s, %s, %s, %s)"
-            cursor.execute(sql, (user.email, hashed_password, user.full_name, user.is_active))
+            sql = """
+                INSERT INTO users (id, email, password_hash, full_name, user_type, app_role, is_active)
+                VALUES (UUID(), %s, %s, %s, %s, NULL, %s)
+            """
+            cursor.execute(
+                sql,
+                (user.email, hashed_password, user.full_name, user_type, user.is_active),
+            )
             self.db_connection.commit()
             cursor.execute("SELECT * FROM users WHERE email = %s ORDER BY created_at DESC LIMIT 1", (user.email,))
             new_user = cursor.fetchone()
@@ -56,10 +69,42 @@ class UserService:
             return int(row["total"]) if row and "total" in row else 0
 
     def update_user(self, user_id: str, user_update: UserCreate) -> Optional[User]:
-        hashed_password = self.get_password_hash(user_update.password) if user_update.password else None
+        existing_user = self.get_user(user_id)
+        if not existing_user:
+            return None
+
+        hashed_password = (
+            self.get_password_hash(user_update.password)
+            if user_update.password
+            else existing_user.password_hash
+        )
+        user_type = (
+            user_update.user_type.value
+            if hasattr(user_update.user_type, "value")
+            else str(user_update.user_type)
+        )
         with self.db_connection.cursor() as cursor:
-            sql = "UPDATE users SET email = %s, password_hash = %s, full_name = %s, is_active = %s WHERE id = %s"
-            cursor.execute(sql, (user_update.email, hashed_password, user_update.full_name, user_update.is_active, user_id))
+            sql = """
+                UPDATE users
+                SET email = %s,
+                    password_hash = %s,
+                    full_name = %s,
+                    user_type = %s,
+                    app_role = NULL,
+                    is_active = %s
+                WHERE id = %s
+            """
+            cursor.execute(
+                sql,
+                (
+                    user_update.email,
+                    hashed_password,
+                    user_update.full_name,
+                    user_type,
+                    user_update.is_active,
+                    user_id,
+                ),
+            )
             self.db_connection.commit()
             return self.get_user(user_id)
 

@@ -14,13 +14,19 @@ class UserBase(BaseModel):
     is_active: bool = True
 
 class UserCreate(UserBase):
-    password: str
+    password: Optional[str] = None
 
-class User(UserBase):
+class UserRead(UserBase):
     id: str
-    password_hash: str # Add this line
     created_at: datetime
     last_login: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class User(UserRead):
+    password_hash: str
 
     class Config:
         from_attributes = True

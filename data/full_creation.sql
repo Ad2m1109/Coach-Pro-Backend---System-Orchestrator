@@ -1,5 +1,10 @@
 -- full_creation.sql
 -- Schema and trigger creation for soccer_analytics
+--
+-- Google sign-in note:
+-- The backend can auto-provision a local user from a verified Google OAuth
+-- login, so Google sign-in does not require a pre-seeded fixed email in the
+-- users table.
 
 CREATE DATABASE IF NOT EXISTS soccer_analytics;
 USE soccer_analytics;

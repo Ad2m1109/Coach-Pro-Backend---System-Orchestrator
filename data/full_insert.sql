@@ -1,5 +1,10 @@
 -- full_insert.sql
 -- Insert initial data for soccer_analytics. Run after full_creation.sql
+--
+-- Note:
+-- The primary owner email below is demo seed data. Google OAuth login can
+-- auto-create a verified local user on first sign-in, so this seed email does
+-- not need to match a Google account.
 
 USE soccer_analytics;
 
@@ -7,10 +12,12 @@ USE soccer_analytics;
 SET @user_id_new = UUID();
 SET @team_id_new = UUID();
 SET @default_password_hash = '$2b$12$mzKhvh02ijxfifha60gAXexnZzQvhO3.mFC3nT7sE4uiarEf5yj2K';
+SET @primary_owner_email = 'newuser@example.com';
+SET @primary_owner_name = 'Primary Account Manager';
 
 -- Insert primary account manager (owner)
 INSERT INTO users (id, email, password_hash, full_name, user_type, app_role, is_active) VALUES
-(@user_id_new, 'newuser@example.com', @default_password_hash, 'New User', 'owner', 'account_manager', TRUE);
+(@user_id_new, @primary_owner_email, @default_password_hash, @primary_owner_name, 'owner', 'account_manager', TRUE);
 
 -- Insert staff user accounts for RBAC testing
 SET @coach_user_id = UUID();
