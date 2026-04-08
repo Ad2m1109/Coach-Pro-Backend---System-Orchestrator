@@ -5,6 +5,10 @@ from pymysql.connections import Connection
 import os
 import logging
 
+from env_loader import load_backend_env
+
+load_backend_env()
+
 logger = logging.getLogger(__name__)
 
 # Database configuration (use environment variables; defaults target XAMPP local setup)

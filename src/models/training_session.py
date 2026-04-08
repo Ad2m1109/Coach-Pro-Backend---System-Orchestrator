@@ -7,6 +7,7 @@ class TrainingSessionBase(BaseModel):
     date: datetime
     focus: str
     icon_name: str
+    team_id: Optional[str] = None
 
 class TrainingSessionCreate(TrainingSessionBase):
     pass

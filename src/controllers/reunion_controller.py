@@ -15,7 +15,10 @@ def create_reunion(reunion: ReunionCreate, db: Connection = Depends(get_db), cur
     user_teams = team_service.get_all_teams(current_user.id)
     user_team_ids = [team.id for team in user_teams]
     service = ReunionService(db)
-    return service.create_reunion(reunion, user_team_ids)
+    try:
+        return service.create_reunion(reunion, user_team_ids)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 @router.get("/reunions", response_model=List[Reunion])
 def get_all_reunions(db: Connection = Depends(get_db), current_user: User = Depends(get_current_active_user)):

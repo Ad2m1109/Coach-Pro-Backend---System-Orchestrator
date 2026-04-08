@@ -23,6 +23,11 @@ CREATE TABLE users (
     user_type ENUM('owner', 'staff') DEFAULT 'owner',
     app_role ENUM('account_manager', 'coach', 'assistant_coach', 'analyst', 'player') NULL,
     is_active BOOLEAN DEFAULT TRUE,
+    email_verified BOOLEAN DEFAULT TRUE,
+    email_verification_code VARCHAR(12) NULL,
+    email_verification_expires_at TIMESTAMP NULL,
+    password_reset_code VARCHAR(12) NULL,
+    password_reset_expires_at TIMESTAMP NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     last_login TIMESTAMP NULL
 );
@@ -69,20 +74,24 @@ CREATE TABLE formations (
 
 CREATE TABLE reunions (
     id CHAR(36) PRIMARY KEY,
+    team_id CHAR(36) NOT NULL,
     title VARCHAR(100) NOT NULL,
     date DATETIME NOT NULL,
     location VARCHAR(100),
     icon_name VARCHAR(50),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE
 );
 
 CREATE TABLE training_sessions (
     id CHAR(36) PRIMARY KEY,
+    team_id CHAR(36) NOT NULL,
     title VARCHAR(100) NOT NULL,
     date DATETIME NOT NULL,
     focus VARCHAR(100),
     icon_name VARCHAR(50),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE
 );
 
 CREATE TABLE events (

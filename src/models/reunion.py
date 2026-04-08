@@ -7,6 +7,7 @@ class ReunionBase(BaseModel):
     date: datetime
     location: str
     icon_name: str
+    team_id: Optional[str] = None
 
 class ReunionCreate(ReunionBase):
     pass

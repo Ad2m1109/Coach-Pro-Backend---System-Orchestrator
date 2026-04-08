@@ -16,19 +16,19 @@ SET @primary_owner_email = 'newuser@example.com';
 SET @primary_owner_name = 'Primary Account Manager';
 
 -- Insert primary account manager (owner)
-INSERT INTO users (id, email, password_hash, full_name, user_type, app_role, is_active) VALUES
-(@user_id_new, @primary_owner_email, @default_password_hash, @primary_owner_name, 'owner', 'account_manager', TRUE);
+INSERT INTO users (id, email, password_hash, full_name, user_type, app_role, is_active, email_verified) VALUES
+(@user_id_new, @primary_owner_email, @default_password_hash, @primary_owner_name, 'owner', 'account_manager', TRUE, TRUE);
 
 -- Insert staff user accounts for RBAC testing
 SET @coach_user_id = UUID();
 SET @assistant_user_id = UUID();
 SET @analyst_user_id = UUID();
 SET @player_user_id = UUID();
-INSERT INTO users (id, email, password_hash, full_name, user_type, app_role, is_active) VALUES
-(@coach_user_id, 'coach@example.com', @default_password_hash, 'Adem Coach', 'staff', 'coach', TRUE),
-(@assistant_user_id, 'assistant@example.com', @default_password_hash, 'Moez Assistant', 'staff', 'assistant_coach', TRUE),
-(@analyst_user_id, 'analyst@example.com', @default_password_hash, 'John Analyst', 'staff', 'analyst', TRUE),
-(@player_user_id, 'player@example.com', @default_password_hash, 'Ali Player', 'staff', 'player', TRUE);
+INSERT INTO users (id, email, password_hash, full_name, user_type, app_role, is_active, email_verified) VALUES
+(@coach_user_id, 'coach@example.com', @default_password_hash, 'Adem Coach', 'staff', 'coach', TRUE, TRUE),
+(@assistant_user_id, 'assistant@example.com', @default_password_hash, 'Moez Assistant', 'staff', 'assistant_coach', TRUE, TRUE),
+(@analyst_user_id, 'analyst@example.com', @default_password_hash, 'John Analyst', 'staff', 'analyst', TRUE, TRUE),
+(@player_user_id, 'player@example.com', @default_password_hash, 'Ali Player', 'staff', 'player', TRUE, TRUE);
 
 -- Insert New Team linked to the New User
 INSERT INTO teams (id, name, user_id, primary_color, secondary_color, logo_url) VALUES
@@ -287,16 +287,16 @@ INSERT INTO match_notes (id, match_id, user_id, content, note_type, video_timest
 (UUID(), @match_id_new, @user_id_new, 'Formation shift to 4-4-2 worked well for stability.', 'tactical', 5400.0);
 
 -- Insert Reunions
-INSERT INTO reunions (id, title, date, location, icon_name) VALUES
-(UUID(), 'Tactical Briefing', '2024-07-30 14:00:00', 'Video Room 1', 'psychology'),
-(UUID(), 'Team Dinner', '2024-08-01 21:00:00', 'The Grand Tavern', 'restaurant'),
-(UUID(), 'Pre-Season Logistics', '2024-07-25 10:00:00', 'Boardroom', 'settings');
+INSERT INTO reunions (id, team_id, title, date, location, icon_name) VALUES
+(UUID(), @team_id_new, 'Tactical Briefing', '2024-07-30 14:00:00', 'Video Room 1', 'psychology'),
+(UUID(), @team_id_new, 'Team Dinner', '2024-08-01 21:00:00', 'The Grand Tavern', 'restaurant'),
+(UUID(), @team_id_new, 'Pre-Season Logistics', '2024-07-25 10:00:00', 'Boardroom', 'settings');
 
 -- Insert Training Sessions
-INSERT INTO training_sessions (id, title, date, focus, icon_name) VALUES
-(UUID(), 'Defensive Drills', '2024-07-28 09:00:00', 'Zonal Marking', 'shield'),
-(UUID(), 'Precision Shooting', '2024-07-29 11:30:00', 'Finishing', 'sports_soccer'),
-(UUID(), 'Midfield Transition', '2024-07-27 15:00:00', 'Counter-Attack', 'trending_flat');
+INSERT INTO training_sessions (id, team_id, title, date, focus, icon_name) VALUES
+(UUID(), @team_id_new, 'Defensive Drills', '2024-07-28 09:00:00', 'Zonal Marking', 'shield'),
+(UUID(), @team_id_new, 'Precision Shooting', '2024-07-29 11:30:00', 'Finishing', 'sports_soccer'),
+(UUID(), @team_id_new, 'Midfield Transition', '2024-07-27 15:00:00', 'Counter-Attack', 'trending_flat');
 
 -- Insert Analysis Reports
 SET @report_id_1 = UUID();

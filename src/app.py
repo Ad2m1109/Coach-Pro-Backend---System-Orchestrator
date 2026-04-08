@@ -1,4 +1,8 @@
 #uvicorn app:app --host 0.0.0.0 --port 8000
+from env_loader import load_backend_env
+
+load_backend_env()
+
 from fastapi import FastAPI, Depends, File, UploadFile, HTTPException, status, BackgroundTasks, Form
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,8 +14,15 @@ import httpx
 
 from database import get_db, Connection
 from services.user_service import UserService
+from services.email_verification_service import (
+    generate_email_verification_code,
+    send_email_verification_email,
+    send_password_reset_email,
+)
 from models.user import User, UserCreate
+from models.team import TeamCreate
 from rbac import derive_app_role, permissions_for_role
+from services.team_service import TeamService
 
 import os
 from google.oauth2 import id_token
@@ -152,6 +163,82 @@ def generate_user_token_data(user, db: Connection):
             })
     return token_data
 
+
+def _derive_default_team_name(full_name: Optional[str], email: str) -> str:
+    preferred_name = (full_name or "").strip()
+    if not preferred_name:
+        local_part = email.split("@", 1)[0]
+        preferred_name = " ".join(
+            segment.capitalize()
+            for segment in local_part.replace(".", " ").replace("_", " ").replace("-", " ").split()
+        ) or "My"
+
+    team_name = f"{preferred_name}'s team"
+    return team_name[:50]
+
+
+def _provision_default_team_for_user(
+    db: Connection,
+    user: User,
+    *,
+    full_name: Optional[str] = None,
+) -> None:
+    team_service = TeamService(db)
+    existing_teams = team_service.get_all_teams(user.id)
+    if existing_teams:
+        return
+
+    default_team = TeamCreate(name=_derive_default_team_name(full_name, user.email))
+    team_service.create_team(default_team, user.id)
+
+
+def _create_user_with_default_team(
+    db: Connection,
+    user_create: UserCreate,
+) -> User:
+    user_service = UserService(db)
+    new_user = user_service.create_user(user_create)
+
+    try:
+        _provision_default_team_for_user(
+            db,
+            new_user,
+            full_name=user_create.full_name,
+        )
+    except Exception:
+        user_service.delete_user(new_user.id)
+        raise
+
+    return new_user
+
+
+def _issue_access_token_for_user(user: User, db: Connection) -> Dict[str, str]:
+    token_data = generate_user_token_data(user, db)
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data=token_data,
+        expires_delta=access_token_expires,
+    )
+    return {"access_token": access_token, "token_type": "bearer"}
+
+
+def _finalize_verified_user(
+    db: Connection,
+    user: User,
+    *,
+    full_name: Optional[str] = None,
+) -> User:
+    if user.user_type == "owner":
+        _provision_default_team_for_user(db, user, full_name=full_name or user.full_name)
+
+    user_service = UserService(db)
+    return user_service.activate_verified_user(user.id) or user
+
+
+def _verification_expiry_utc() -> datetime:
+    ttl_minutes = int(os.environ.get("EMAIL_VERIFICATION_CODE_TTL_MINUTES", "15"))
+    return datetime.utcnow() + timedelta(minutes=ttl_minutes)
+
 @app.post("/api/token", tags=["Authentication"])
 async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Connection = Depends(get_db)):
     user_service = UserService(db)
@@ -173,19 +260,43 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+    if not user.is_active:
+        if user_service.is_email_verification_pending(user.email):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Email not verified. Enter the verification code sent to your inbox.",
+            )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This account is inactive.",
+        )
+
     # Case 3: Success
-    token_data = generate_user_token_data(user, db)
-    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(
-        data=token_data, 
-        expires_delta=access_token_expires
-    )
-    return {"access_token": access_token, "token_type": "bearer"}
+    return _issue_access_token_for_user(user, db)
 
 from pydantic import BaseModel
 class GoogleAuthRequest(BaseModel):
     id_token: Optional[str] = None
     access_token: Optional[str] = None
+
+
+class RegisterVerifyRequest(BaseModel):
+    email: str
+    code: str
+
+
+class RegisterResendRequest(BaseModel):
+    email: str
+
+
+class PasswordResetRequest(BaseModel):
+    email: str
+
+
+class PasswordResetConfirmRequest(BaseModel):
+    email: str
+    code: str
+    new_password: str
 
 
 async def _fetch_google_userinfo_from_access_token(access_token: str) -> Dict[str, Any]:
@@ -291,37 +402,204 @@ async def google_auth(auth_req: GoogleAuthRequest, db: Connection = Depends(get_
             user_type="owner",
             is_active=True
         )
-        user = user_service.create_user(user_create)
+        try:
+            user = _create_user_with_default_team(db, user_create)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Could not provision the default team for this account.",
+            ) from exc
+    elif not user_service.is_email_verified(user.id):
+        try:
+            user = _finalize_verified_user(db, user, full_name=full_name)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Could not finalize this account after Google verification.",
+            ) from exc
 
     # Generate our JWT
-    token_data = generate_user_token_data(user, db)
-    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(
-        data=token_data, 
-        expires_delta=access_token_expires
-    )
-    return {"access_token": access_token, "token_type": "bearer"}
+    return _issue_access_token_for_user(user, db)
 
 @app.post("/api/register", tags=["Authentication"])
 async def register_user(user_create: UserCreate, db: Connection = Depends(get_db)):
     user_service = UserService(db)
-    if user_service.count_users() > 0:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Self-registration is disabled. Ask account manager to create your account.",
-        )
     existing_user = user_service.get_user_by_email(email=user_create.email)
     if existing_user:
+        if user_service.is_email_verification_pending(existing_user.email):
+            verification_code = generate_email_verification_code()
+            verification_expires_at = _verification_expiry_utc()
+            user_service.refresh_email_verification_code(
+                existing_user.email,
+                verification_code=verification_code,
+                verification_expires_at=verification_expires_at,
+            )
+            try:
+                send_email_verification_email(
+                    existing_user.email,
+                    verification_code,
+                    full_name=existing_user.full_name,
+                )
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Could not send the verification email.",
+                ) from exc
+            return {
+                "status": "pending_verification",
+                "email": existing_user.email,
+                "detail": "Verification code re-sent.",
+            }
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered")
-    
-    new_user = user_service.create_user(user_create)
 
-    token_data = generate_user_token_data(new_user, db)
-    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(
-        data=token_data, expires_delta=access_token_expires
+    verification_code = generate_email_verification_code()
+    verification_expires_at = _verification_expiry_utc()
+
+    try:
+        pending_user = user_service.create_pending_user(
+            user_create,
+            verification_code=verification_code,
+            verification_expires_at=verification_expires_at,
+        )
+        send_email_verification_email(
+            pending_user.email,
+            verification_code,
+            full_name=pending_user.full_name,
+        )
+    except Exception as exc:
+        if "pending_user" in locals():
+            user_service.delete_user(pending_user.id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Could not start email verification for this account.",
+        ) from exc
+
+    return {
+        "status": "pending_verification",
+        "email": pending_user.email,
+        "detail": "Verification code sent.",
+    }
+
+
+@app.post("/api/register/verify", tags=["Authentication"])
+async def verify_registered_user(payload: RegisterVerifyRequest, db: Connection = Depends(get_db)):
+    user_service = UserService(db)
+    user = user_service.verify_email_code(payload.email, payload.code)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired verification code.",
+        )
+
+    if not user_service.is_email_verified(user.id):
+        try:
+            user = _finalize_verified_user(db, user, full_name=user.full_name)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Could not finish account verification.",
+            ) from exc
+
+    return _issue_access_token_for_user(user, db)
+
+
+@app.post("/api/register/resend", tags=["Authentication"])
+async def resend_registration_code(payload: RegisterResendRequest, db: Connection = Depends(get_db)):
+    user_service = UserService(db)
+    user = user_service.get_user_by_email(payload.email)
+    if not user or user_service.is_email_verified(user.id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No pending email verification found for this account.",
+        )
+
+    verification_code = generate_email_verification_code()
+    verification_expires_at = _verification_expiry_utc()
+    updated = user_service.refresh_email_verification_code(
+        user.email,
+        verification_code=verification_code,
+        verification_expires_at=verification_expires_at,
     )
-    return {"access_token": access_token, "token_type": "bearer"}
+    if not updated:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No pending email verification found for this account.",
+        )
+
+    try:
+        send_email_verification_email(
+            user.email,
+            verification_code,
+            full_name=user.full_name,
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Could not send the verification email.",
+        ) from exc
+
+    return {
+        "status": "pending_verification",
+        "email": user.email,
+        "detail": "Verification code re-sent.",
+    }
+
+
+@app.post("/api/password/forgot", tags=["Authentication"])
+async def request_password_reset(payload: PasswordResetRequest, db: Connection = Depends(get_db)):
+    user_service = UserService(db)
+    reset_code = generate_email_verification_code()
+    reset_expires_at = _verification_expiry_utc()
+
+    user = user_service.start_password_reset(
+        payload.email,
+        reset_code=reset_code,
+        reset_expires_at=reset_expires_at,
+    )
+
+    if user:
+        try:
+            send_password_reset_email(
+                user.email,
+                reset_code,
+                full_name=user.full_name,
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Could not send the password reset email.",
+            ) from exc
+
+    return {
+        "status": "ok",
+        "detail": "If the account exists, a password reset code was sent.",
+    }
+
+
+@app.post("/api/password/reset", tags=["Authentication"])
+async def reset_password_with_code(payload: PasswordResetConfirmRequest, db: Connection = Depends(get_db)):
+    if len(payload.new_password) < 6:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Password must be at least 6 characters long.",
+        )
+
+    user_service = UserService(db)
+    user = user_service.reset_password_with_code(
+        payload.email,
+        reset_code=payload.code,
+        new_password=payload.new_password,
+    )
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired password reset code.",
+        )
+
+    return {
+        "status": "ok",
+        "detail": "Password updated successfully.",
+    }
 
 @app.get("/", tags=["Root"])
 async def read_root():

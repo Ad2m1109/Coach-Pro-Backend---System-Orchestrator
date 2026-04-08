@@ -1,3 +1,7 @@
+from env_loader import load_backend_env
+
+load_backend_env()
+
 from fastapi import FastAPI, Depends, File, UploadFile, HTTPException, status, BackgroundTasks, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer
@@ -171,6 +175,20 @@ async def health_check():
         "service": "analysis-backend",
         "tracking_engine": os.environ.get("TRACKING_ENGINE_HOST", "localhost") + ":" + str(os.environ.get("TRACKING_ENGINE_PORT", 50051)),
     }
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Ensure database schema is up-to-date on startup."""
+    db_gen = get_db()
+    db = next(db_gen)
+    try:
+        _ensure_analysis_run_columns(db)
+    finally:
+        try:
+            next(db_gen)
+        except StopIteration:
+            pass
 
 
 def _ensure_analysis_run_columns(db: Connection):
@@ -412,7 +430,7 @@ async def run_tracking_analysis_job(
 
         result = await client.analyze_video(
             video_path=video_path,
-            match_id=match_id,
+            match_id=job_id,
             frame_limit=frame_limit,
             skip_json=skip_json,
             confidence_threshold=confidence_threshold,

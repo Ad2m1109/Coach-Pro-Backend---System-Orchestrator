@@ -29,7 +29,7 @@ class TrackingEngineClient:
         self.channel = None
         self.stub = None
 
-    def connect(self):
+    async def connect(self):
         """Establish connection to the gRPC server."""
         try:
             address = f'{self.host}:{self.port}'

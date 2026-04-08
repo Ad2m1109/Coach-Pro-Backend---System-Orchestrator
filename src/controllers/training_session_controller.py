@@ -15,7 +15,10 @@ def create_training_session(session: TrainingSessionCreate, db: Connection = Dep
     user_teams = team_service.get_all_teams(current_user.id)
     user_team_ids = [team.id for team in user_teams]
     service = TrainingSessionService(db)
-    return service.create_training_session(session, user_team_ids)
+    try:
+        return service.create_training_session(session, user_team_ids)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 @router.get("/training_sessions", response_model=List[TrainingSession])
 def get_all_training_sessions(db: Connection = Depends(get_db), current_user: User = Depends(get_current_active_user)):

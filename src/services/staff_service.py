@@ -2,6 +2,7 @@ from typing import List, Optional
 from models.staff import Staff, StaffCreate, StaffCreateWithAccount, PermissionLevelEnum
 from models.user import UserCreate, UserTypeEnum
 from passlib.context import CryptContext
+from services.user_service import UserService
 import uuid
 
 class StaffService:
@@ -9,14 +10,24 @@ class StaffService:
         self.db_connection = db_connection
         self.pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
+    @staticmethod
+    def _normalize_email(email: Optional[str]) -> Optional[str]:
+        if email is None:
+            return None
+        normalized = email.strip().lower()
+        return normalized or None
+
     def create_staff_with_account(self, staff_data: StaffCreateWithAccount, user_team_ids: List[str]) -> Staff:
         """Create a staff member with a new user account"""
         if staff_data.team_id not in user_team_ids:
             raise ValueError("Team not owned by current user.")
+
+        UserService(self.db_connection)._ensure_verification_schema()
+        normalized_email = self._normalize_email(staff_data.email)
         
         with self.db_connection.cursor() as cursor:
             # Check if email already exists
-            cursor.execute("SELECT id FROM users WHERE email = %s", (staff_data.email,))
+            cursor.execute("SELECT id FROM users WHERE email = %s", (normalized_email,))
             if cursor.fetchone():
                 raise ValueError("Email already exists")
             
@@ -25,8 +36,13 @@ class StaffService:
             password_hash = self.pwd_context.hash(staff_data.password)
             
             cursor.execute(
-                "INSERT INTO users (id, email, password_hash, full_name, user_type, is_active) VALUES (%s, %s, %s, %s, %s, %s)",
-                (user_id, staff_data.email, password_hash, staff_data.name, UserTypeEnum.staff.value, True)
+                """
+                INSERT INTO users (
+                    id, email, password_hash, full_name, user_type, is_active, email_verified
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, TRUE)
+                """,
+                (user_id, normalized_email, password_hash, staff_data.name, UserTypeEnum.staff.value, True)
             )
             
             # Create staff record
@@ -34,7 +50,7 @@ class StaffService:
             permission_level = self._permission_level_for_role(staff_data.role.value)
             cursor.execute(
                 "INSERT INTO staff (id, team_id, user_id, name, role, permission_level, email) VALUES (%s, %s, %s, %s, %s, %s, %s)",
-                (staff_id, staff_data.team_id, user_id, staff_data.name, staff_data.role.value, permission_level, staff_data.email)
+                (staff_id, staff_data.team_id, user_id, staff_data.name, staff_data.role.value, permission_level, normalized_email)
             )
             
             self.db_connection.commit()
@@ -47,6 +63,7 @@ class StaffService:
         """Create staff without user account (legacy method)"""
         if staff.team_id not in user_team_ids:
             raise ValueError("Team not owned by current user.")
+        normalized_email = self._normalize_email(staff.email)
         with self.db_connection.cursor() as cursor:
             permission_level = self._permission_level_for_role(staff.role.value if staff.role else None)
             sql = "INSERT INTO staff (id, team_id, name, role, permission_level, email, user_id) VALUES (UUID(), %s, %s, %s, %s, %s, %s)"
@@ -55,7 +72,7 @@ class StaffService:
                 staff.name, 
                 staff.role.value if staff.role else None,
                 permission_level,
-                staff.email,
+                normalized_email,
                 staff.user_id
             ))
             self.db_connection.commit()
@@ -84,6 +101,7 @@ class StaffService:
     def update_staff(self, staff_id: str, staff_update: StaffCreate, user_team_ids: List[str]) -> Optional[Staff]:
         if staff_update.team_id not in user_team_ids:
             raise ValueError("Team not owned by current user.")
+        normalized_email = self._normalize_email(staff_update.email)
         with self.db_connection.cursor() as cursor:
             permission_level = self._permission_level_for_role(staff_update.role.value if staff_update.role else None)
             sql = "UPDATE staff SET team_id = %s, name = %s, role = %s, permission_level = %s, email = %s WHERE id = %s AND team_id IN %s"
@@ -92,7 +110,7 @@ class StaffService:
                 staff_update.name, 
                 staff_update.role.value if staff_update.role else None, 
                 permission_level,
-                staff_update.email,
+                normalized_email,
                 staff_id, 
                 user_team_ids
             ))

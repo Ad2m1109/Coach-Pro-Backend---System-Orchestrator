@@ -1,6 +1,10 @@
 import os
 from pathlib import Path
 
+from env_loader import load_backend_env
+
+load_backend_env()
+
 
 def _project_root() -> Path:
     # backend/src/security/jwt_keys.py -> backend/src -> backend
@@ -45,4 +49,3 @@ def get_jwt_public_key() -> str:
         env_path="JWT_PUBLIC_KEY_PATH",
         default_path=root / "certs" / "public.pem",
     )
-
