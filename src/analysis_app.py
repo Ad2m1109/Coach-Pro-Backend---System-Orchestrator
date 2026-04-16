@@ -36,6 +36,7 @@ from services.user_service import UserService
 from models.user import User
 from analysis_engine import FootballAnalyzer
 from services.tracking_engine_client import TrackingEngineClient
+from services.flow_analysis_service import FlowAnalysisService
 
 # --- Configuration for JWT (RS256 - Public Key Verification Only) --- #
 import os
@@ -363,6 +364,9 @@ async def run_tracking_analysis_job(
     ball_confidence: float = 0.3,
     max_lost_frames: int = 15,
     enable_reid: bool = False,
+    target_team: str = "Both",
+    camera_count: int = 1,
+    camera_type: str = "TV",
 ):
     """Run tracking pipeline through Tracking Engine and persist status in DB."""
     client = TrackingEngineClient()
@@ -394,6 +398,12 @@ async def run_tracking_analysis_job(
                     seg_payload["type"] = "segment"
                     seg_payload["status"] = "SEGMENT_DONE"
                     await push_analysis_segment_event(job_id, seg_payload)
+
+                    # --- Hybrid Flow Analysis ---
+                    flow_event = await FlowAnalysisService.process_segment(job_id, seg_payload)
+                    if flow_event:
+                        await push_analysis_segment_event(job_id, flow_event)
+                        
                 except Exception as seg_err:
                     import logging
 
@@ -439,6 +449,9 @@ async def run_tracking_analysis_job(
             ball_confidence=ball_confidence,
             max_lost_frames=max_lost_frames,
             enable_reid=enable_reid,
+            target_team=target_team,
+            camera_count=camera_count,
+            camera_type=camera_type,
             progress_callback=progress_callback,
         )
 
@@ -497,6 +510,7 @@ async def run_tracking_analysis_job(
         except Exception:
             pass
         # Keep source file for reuse/retry; cleanup occurs on cancel or manual maintenance.
+        FlowAnalysisService.clear_buffer(job_id)
         pass
 
 
@@ -610,6 +624,7 @@ async def get_analysis_status(analysis_id: str, db: Connection = Depends(get_db)
         "progress": float(row.get("progress") or 0.0),
         "message": row.get("message") or "",
         "outputs": _build_outputs_for_run(row["id"]),
+        "input_video_path": f"temp_uploads/{os.path.basename(row['input_video_path'])}" if row.get("input_video_path") else None,
         "submitted_at": row["submitted_at"].isoformat() if row.get("submitted_at") else None,
         "completed_at": row["completed_at"].isoformat() if row.get("completed_at") else None,
     }
@@ -672,6 +687,16 @@ async def delete_analysis_history_item(
 
 
 def _resolve_output_path(path: str) -> Path:
+    if path.startswith("temp_uploads/"):
+        filename = path.replace("temp_uploads/", "")
+        candidate = (Path(PROJECT_ROOT) / "temp_uploads" / filename).resolve()
+        # Verify it stays within temp_uploads
+        if not str(candidate).startswith(os.path.abspath(os.path.join(PROJECT_ROOT, "temp_uploads"))):
+            raise HTTPException(status_code=400, detail="Invalid path")
+        if not candidate.exists() or not candidate.is_file():
+            raise HTTPException(status_code=404, detail="File not found")
+        return candidate
+
     relative = Path(path)
     candidate = (ANALYSIS_OUTPUT_ROOT / relative).resolve()
     output_root_resolved = ANALYSIS_OUTPUT_ROOT.resolve()
@@ -898,6 +923,7 @@ async def detect_objects_in_image(file: UploadFile = File(...)):
 async def analyze_match_video(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
+    file2: Optional[UploadFile] = File(None),
     match_id: Optional[str] = Form(None),
     frame_limit: int = Form(0),
     skip_json: bool = Form(False),
@@ -905,6 +931,9 @@ async def analyze_match_video(
     ball_confidence: float = Form(0.3),
     max_lost_frames: int = Form(15),
     enable_reid: bool = Form(False),
+    target_team: str = Form("Both"),
+    camera_count: int = Form(1),
+    camera_type: str = Form("TV"),
     current_user: User = Depends(get_current_user),
 ):
     """
@@ -921,6 +950,14 @@ async def analyze_match_video(
         file_path = os.path.abspath(os.path.join(upload_dir, f"{analysis_id}_{safe_name}"))
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
+            
+        file_path_2 = None
+        if file2:
+            safe_name_2 = file2.filename or "video2.mp4"
+            file_path_2 = os.path.abspath(os.path.join(upload_dir, f"{analysis_id}_{safe_name_2}"))
+            with open(file_path_2, "wb") as buffer:
+                shutil.copyfileobj(file2.file, buffer)
+
         _create_analysis_run(
             run_id=analysis_id,
             match_id=effective_match_id,
@@ -946,6 +983,9 @@ async def analyze_match_video(
                     ball_confidence=ball_confidence,
                     max_lost_frames=max_lost_frames,
                     enable_reid=enable_reid,
+                    target_team=target_team,
+                    camera_count=camera_count,
+                    camera_type=camera_type,
                 )
             finally:
                 _active_analysis_tasks.pop(analysis_id, None)

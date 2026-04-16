@@ -52,6 +52,9 @@ class TrackingEngineClient:
         ball_confidence: float = 0.3,
         max_lost_frames: int = 15,
         enable_reid: bool = False,
+        target_team: str = "Both",
+        camera_count: int = 1,
+        camera_type: str = "TV",
         progress_callback: Optional[Callable] = None
     ) -> dict:
         """
@@ -87,6 +90,9 @@ class TrackingEngineClient:
             ball_confidence=ball_confidence,
             max_lost_frames=max_lost_frames,
             enable_reid=enable_reid,
+            target_team=target_team,
+            camera_count=camera_count,
+            camera_type=camera_type,
         )
         
         logger.info(f"Submitting analysis request for match {match_id}: {video_path}")
