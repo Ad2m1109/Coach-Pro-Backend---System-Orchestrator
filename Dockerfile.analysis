@@ -1,0 +1,33 @@
+FROM python:3.10-slim
+
+WORKDIR /app
+
+# Install system dependencies required by opencv-python-headless and other packages
+RUN apt-get update && apt-get install -y \
+    libgl1 \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender1 \
+    libxcb1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements first for Docker layer caching
+COPY requirements.txt .
+RUN pip install --no-cache-dir --default-timeout=1000 -r requirements.txt
+
+# Copy entire backend source
+COPY . .
+
+# Create certs directory and generate self-signed JWT keys for dev (if not present)
+RUN mkdir -p /app/certs && \
+    if [ ! -f /app/certs/private.pem ]; then \
+        openssl genrsa -out /app/certs/private.pem 2048 && \
+        openssl rsa -in /app/certs/private.pem -pubout -out /app/certs/public.pem; \
+    fi
+
+WORKDIR /app/src
+
+EXPOSE 8001
+
+CMD ["uvicorn", "analysis_app:app", "--host", "0.0.0.0", "--port", "8001"]

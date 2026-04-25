@@ -16,7 +16,7 @@ for _p in [str(_PIPELINE_ROOT), str(_PIPELINE_ROOT / "features")]:
         sys.path.append(_p)
 
 # Import TacticalAdvisor from the tracking engine's pipeline
-from llm_interface import TacticalAdvisor
+from .llm_interface import TacticalAdvisor
 
 logger = logging.getLogger(__name__)
 

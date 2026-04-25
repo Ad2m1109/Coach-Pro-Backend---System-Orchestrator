@@ -24,7 +24,9 @@ class TrackingEngineClient:
             host: gRPC server host (defaults to env var or localhost)
             port: gRPC server port (defaults to env var or 50051)
         """
-        self.host = host or os.environ.get('TRACKING_ENGINE_HOST', 'localhost')
+        # Default to 'tracking-engine' (Docker Compose service name) for containerized environments.
+        # Falls back to 'localhost' for local dev outside Docker.
+        self.host = host or os.environ.get('TRACKING_ENGINE_HOST', 'tracking-engine')
         self.port = port or int(os.environ.get('TRACKING_ENGINE_PORT', 50051))
         self.channel = None
         self.stub = None

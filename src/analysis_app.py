@@ -140,6 +140,16 @@ app = FastAPI(
     version="1.0.0",
 )
 
+
+@app.get("/health", tags=["health"], summary="Health check")
+async def health_check():
+    """
+    Lightweight health endpoint for Docker/load-balancer checks.
+    Future: add Redis liveness when SSE/WebSocket fan-out moves to Redis.
+    """
+    return {"status": "ok", "service": "analysis"}
+
+
 cors_origins_raw = os.environ.get("CORS_ALLOW_ORIGINS", "").strip()
 cors_origins = (
     [o.strip() for o in cors_origins_raw.split(",") if o.strip()]

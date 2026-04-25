@@ -68,6 +68,16 @@ app = FastAPI(
     version="1.0.0",
 )
 
+
+@app.get("/health", tags=["health"], summary="Health check")
+async def health_check():
+    """
+    Lightweight health endpoint for Docker/load-balancer checks.
+    Future: add Redis liveness when SSE/WebSocket fan-out moves to Redis.
+    """
+    return {"status": "ok", "service": "classic"}
+
+
 # Mount the static directory to serve images
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
