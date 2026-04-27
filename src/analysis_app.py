@@ -45,14 +45,29 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_INTERNAL_PIPELINE_ROOT = Path(PROJECT_ROOT).parent / "tracking_engine" / "pipeline"
 LEGACY_INTERNAL_DEMO_ROOT = Path(PROJECT_ROOT).parent / "tracking_engine" / "demo"
 LEGACY_EXTERNAL_DEMO_ROOT = Path(PROJECT_ROOT).parent / "demo"
-ANALYSIS_OUTPUT_ROOT = Path(
-    os.getenv("ANALYSIS_OUTPUT_ROOT", str(DEFAULT_INTERNAL_PIPELINE_ROOT))
-).resolve()
-if not ANALYSIS_OUTPUT_ROOT.exists():
+
+# Try common mount paths for ANALYSIS_OUTPUT_ROOT (env var or known mount points)
+_candidate_paths = [
+    os.getenv("ANALYSIS_OUTPUT_ROOT"),  # Allow override via env
+    str(Path(PROJECT_ROOT).parent / "tracking_engine" / "pipeline"),  # /app/tracking_engine/pipeline
+    "/app/tracking_engine/pipeline",  # Hardcoded mount path
+]
+ANALYSIS_OUTPUT_ROOT = None
+for p in _candidate_paths:
+    if p:
+        _path = Path(p).resolve()
+        if _path.exists():
+            ANALYSIS_OUTPUT_ROOT = _path
+            break
+
+# Fallback: try legacy paths if still not found
+if ANALYSIS_OUTPUT_ROOT is None:
     if LEGACY_INTERNAL_DEMO_ROOT.exists():
         ANALYSIS_OUTPUT_ROOT = LEGACY_INTERNAL_DEMO_ROOT.resolve()
     elif LEGACY_EXTERNAL_DEMO_ROOT.exists():
         ANALYSIS_OUTPUT_ROOT = LEGACY_EXTERNAL_DEMO_ROOT.resolve()
+    else:
+        ANALYSIS_OUTPUT_ROOT = DEFAULT_INTERNAL_PIPELINE_ROOT.resolve()
 
 from security.jwt_keys import get_jwt_public_key
 
@@ -418,6 +433,22 @@ async def run_tracking_analysis_job(
                     import logging
 
                     logging.getLogger(__name__).error(f"Failed to persist segment: {seg_err}")
+            elif response.status == "TRACKING_VIDEO_READY":
+                # Tracking video is now available - store in DB for streaming
+                if response.result and response.result.tracking_video_path:
+                    from database import get_db
+                    db = await get_db().__aenter__()
+                    try:
+                        with db.cursor() as cursor:
+                            cursor.execute(
+                                """INSERT INTO analysis_tracking_videos (run_id, video_path, frame_count, created_at)
+                                VALUES (%s, %s, %s, NOW())
+                                ON DUPLICATE KEY UPDATE video_path = VALUES(video_path), frame_count = VALUES(frame_count)""",
+                                (job_id, response.result.tracking_video_path, response.result.total_frames),
+                            )
+                        await db.commit()
+                    finally:
+                        db.close()
             elif response.status == "ALERT":
                 # Only stream tactical alerts; keep run status unchanged.
                 pass
@@ -626,18 +657,39 @@ async def get_analysis_status(analysis_id: str, db: Connection = Depends(get_db)
     if not row:
         raise HTTPException(status_code=404, detail="Analysis task not found")
 
-    return {
+    # Check if tracking video is available for streaming
+    tracking_video_path = None
+    with db.cursor() as cursor:
+        cursor.execute(
+            "SELECT video_path FROM analysis_tracking_videos WHERE run_id = %s LIMIT 1",
+            (analysis_id,),
+        )
+        video_row = cursor.fetchone()
+        if video_row:
+            tracking_video_path = video_row.get("video_path")
+
+    # Build outputs (looking for files)
+    outputs = _build_outputs_for_run(row["id"])
+
+    response_data = {
         "analysis_id": row["id"],
         "match_id": row.get("match_id"),
         "input_video_name": row.get("input_video_name"),
         "status": row.get("status"),
         "progress": float(row.get("progress") or 0.0),
         "message": row.get("message") or "",
-        "outputs": _build_outputs_for_run(row["id"]),
+        "outputs": outputs,
         "input_video_path": f"temp_uploads/{os.path.basename(row['input_video_path'])}" if row.get("input_video_path") else None,
         "submitted_at": row["submitted_at"].isoformat() if row.get("submitted_at") else None,
         "completed_at": row["completed_at"].isoformat() if row.get("completed_at") else None,
     }
+
+    # Add tracking video for streaming if available
+    if tracking_video_path:
+        response_data["tracking_video_path"] = tracking_video_path
+        response_data["outputs"]["tracking_video_path"] = tracking_video_path
+
+    return response_data
 
 
 @app.get("/api/analysis_history", tags=["Analysis"])
@@ -718,40 +770,93 @@ def _resolve_output_path(path: str) -> Path:
 
 
 def _build_outputs_for_run(run_id: str) -> Dict[str, str]:
-    """Build output file paths dynamically from run id (no DB path storage)."""
-    candidates = {
-        "tracking_video_path": f"outputs/{run_id}tracking.mp4",
-        "tracking_json_path": f"outputs/{run_id}tracking.json",
-        "backline_video_path": f"outputs/analytics/{run_id}backline.mp4",
-        "heatmap_video_path": f"outputs/heatmaps/{run_id}heatmap.mp4",
-        "possession_analysis_path": f"outputs/analytics/{run_id}possession.json",
-        "animation_video_path": f"outputs/analytics/{run_id}animation.mp4",
-        "heatmap_image_path": f"outputs/heatmaps/{run_id}heatmap.png",
-        "all_players_grid_image_path": f"outputs/heatmaps/{run_id}all_players_grid.png",
-        "movement_trail_image_path": f"outputs/analytics/{run_id}movement_trail.png",
-        "possession_chart_image_path": f"outputs/analytics/{run_id}possession_analysis.png",
-        "tactical_advisory_path": f"outputs/analytics/{run_id}advisory.json",
-    }
-
+    """Build output file paths dynamically from run id (no DB path storage).
+    
+    Supports two output formats:
+    1. New: outputs/analysis_{run_id}_{timestamp}/tracking_output.mp4
+    2. Old flat: outputs/{run_id}tracking.mp4
+    
+    Also checks for previews in outputs/previews/
+    """
     outputs: Dict[str, str] = {}
-    for key, rel_path in candidates.items():
-        abs_path = ANALYSIS_OUTPUT_ROOT / rel_path
-        if abs_path.exists() and abs_path.is_file():
-            outputs[key] = rel_path
+    
+    # Try NEW directory format first: outputs/analysis_{run_id}_{timestamp}/
+    run_output_dir = None
+    outputs_base = ANALYSIS_OUTPUT_ROOT / "outputs"
+    if outputs_base.exists():
+        for item in outputs_base.iterdir():
+            if item.is_dir() and item.name.startswith(f"analysis_{run_id}_"):
+                run_output_dir = item
+                break
+    
+    if run_output_dir:
+        candidates = {
+            "tracking_video_path": f"outputs/{run_output_dir.name}/tracking_output.mp4",
+            "tracking_json_path": f"outputs/{run_output_dir.name}/tracking_results.json",
+            "backline_video_path": f"outputs/{run_output_dir.name}/analytics/backline_analysis.mp4",
+            "heatmap_video_path": f"outputs/{run_output_dir.name}/heatmaps/heatmap_analysis.mp4",
+            "possession_analysis_path": f"outputs/{run_output_dir.name}/analytics/possession_analysis_results.json",
+            "animation_video_path": f"outputs/{run_output_dir.name}/analytics/tracking_animation.mp4",
+            "tactical_advisory_path": f"outputs/{run_output_dir.name}/analytics/tactical_advisory.json",
+        }
+        for key, rel_path in candidates.items():
+            abs_path = ANALYSIS_OUTPUT_ROOT / rel_path
+            if abs_path.exists() and abs_path.is_file():
+                outputs[key] = rel_path
+        
+        # Check for preview videos (both run-specific and generic names)
+        preview_mappings = [
+            ('tracking_video_path', 'tracking_output_preview.mp4'),
+            ('backline_video_path', 'backline_preview.mp4'),
+            ('heatmap_video_path', 'heatmap_preview.mp4'),
+            ('animation_video_path', 'tracking_animation_preview.mp4'),
+        ]
+        for video_key, generic_preview_name in preview_mappings:
+            if video_key not in outputs:
+                continue
+            # First try generic name in outputs/previews/
+            generic_preview_path = f'outputs/previews/{generic_preview_name}'
+            if (ANALYSIS_OUTPUT_ROOT / generic_preview_path).exists():
+                outputs[f'{video_key.replace("_path", "")}_preview_path'] = generic_preview_path
+            # Also try run-specific name
+            elif run_output_dir:
+                stem = run_output_dir.name
+                run_specific_preview = f'outputs/previews/{stem}_{generic_preview_name}'
+                if (ANALYSIS_OUTPUT_ROOT / run_specific_preview).exists():
+                    outputs[f'{video_key.replace("_path", "")}_preview_path'] = run_specific_preview
+    
+    # Fallback: try OLD flat format
+    if not outputs:
+        candidates = {
+            "tracking_video_path": f"{run_id}tracking.mp4",
+            "tracking_json_path": f"{run_id}tracking.json",
+            "backline_video_path": f"{run_id}analytics_backline.mp4",
+            "heatmap_video_path": f"{run_id}heatmap.mp4",
+            "possession_analysis_path": f"{run_id}possession.json",
+            "animation_video_path": f"{run_id}animation.mp4",
+            "tactical_advisory_path": f"{run_id}tactical_advisory.json",
+        }
+        for key, rel_path in candidates.items():
+            abs_path = ANALYSIS_OUTPUT_ROOT / rel_path
+            if abs_path.exists() and abs_path.is_file():
+                outputs[key] = rel_path
 
-    for key in [
-        "tracking_video_path",
-        "heatmap_video_path",
-        "backline_video_path",
-        "animation_video_path",
-    ]:
-        rel_path = outputs.get(key)
-        if not rel_path:
-            continue
-        preview_rel = f"outputs/previews/{Path(rel_path).stem}_preview.mp4"
-        preview_abs = ANALYSIS_OUTPUT_ROOT / preview_rel
-        if preview_abs.exists() and preview_abs.is_file():
-            outputs[f"{key.replace('_path', '')}_preview_path"] = preview_rel
+        for key in ["tracking_video_path", "heatmap_video_path", "backline_video_path", "animation_video_path"]:
+            rel_path = outputs.get(key)
+            if not rel_path:
+                continue
+            # Try generic preview names
+            generic_preview_map = {
+                "tracking_video_path": "tracking_output_preview.mp4",
+                "heatmap_video_path": "heatmap_preview.mp4",
+                "backline_video_path": "backline_preview.mp4",
+                "animation_video_path": "tracking_animation_preview.mp4",
+            }
+            generic_preview = generic_preview_map.get(key)
+            if generic_preview:
+                preview_rel = f"previews/{generic_preview}"
+                if (ANALYSIS_OUTPUT_ROOT / preview_rel).exists():
+                    outputs[f'{key.replace("_path", "")}_preview_path'] = preview_rel
 
     return outputs
 
@@ -789,7 +894,7 @@ def _create_preview_video(file_path: Path) -> Optional[str]:
     """Create low-resolution preview video for faster mobile playback."""
     if file_path.suffix.lower() != ".mp4":
         return None
-    previews_dir = ANALYSIS_OUTPUT_ROOT / "outputs" / "previews"
+    previews_dir = ANALYSIS_OUTPUT_ROOT / "previews"
     previews_dir.mkdir(parents=True, exist_ok=True)
     preview_name = f"{file_path.stem}_preview.mp4"
     preview_path = previews_dir / preview_name
@@ -810,7 +915,7 @@ def _create_preview_video(file_path: Path) -> Optional[str]:
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
         if result.returncode == 0 and preview_path.exists():
-            return f"outputs/previews/{preview_name}"
+            return f"previews/{preview_name}"
     except Exception:
         pass
     return None

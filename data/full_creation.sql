@@ -210,10 +210,22 @@ CREATE TABLE analysis_runs (
     status ENUM('PENDING', 'PROCESSING', 'COMPLETED', 'FAILED') DEFAULT 'PENDING',
     progress DECIMAL(5,4) DEFAULT 0.0,
     message TEXT,
+    tracking_video_path VARCHAR(512),
     submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     completed_at TIMESTAMP NULL,
     generated_by CHAR(36) NULL,
     FOREIGN KEY (generated_by) REFERENCES users(id) ON DELETE SET NULL
+);
+
+-- Table to store tracking video paths during analysis (for streaming while processing)
+CREATE TABLE analysis_tracking_videos (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    run_id CHAR(36) NOT NULL,
+    video_path VARCHAR(512) NOT NULL,
+    frame_count INT DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY (run_id),
+    FOREIGN KEY (run_id) REFERENCES analysis_runs(id) ON DELETE CASCADE
 );
 
 CREATE TABLE video_segments (
